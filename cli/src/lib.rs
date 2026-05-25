@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fs;
 use std::hash::Hash;
 use std::io::{self, BufRead, Write};
@@ -22,7 +22,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState, Wrap},
 };
-use regex::Regex;
 
 #[derive(serde::Serialize)]
 struct CliProjectInspect {
@@ -170,13 +169,11 @@ const I_BULLET: &str = "\u{f111}"; // ● circle (active marker)
 const I_COMMIT: &str = "\u{f1d3}"; // git commit
 const I_ISSUES: &str = "\u{f41b}"; // github mark
 const I_SETUP: &str = "\u{f013}"; // cog
-const I_PROMPTS: &str = "\u{f0ae}"; // list
 const I_PROJECTS: &str = "\u{f07b}"; // folder
 const I_MEMORY: &str = "\u{f0eb}"; // lightbulb (memories)
 const I_MCP: &str = "\u{f0c1}"; // link/chain
 const I_PANE: &str = "\u{f120}"; // >_ terminal prompt
 
-const PEMGUIN_MCP_SERVER_NAME: &str = "pemguin";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -220,43 +217,6 @@ struct RepoMeta {
     open_issues: Option<u32>,
 }
 
-#[derive(Clone)]
-struct Prompt {
-    name: String,
-    group: Option<String>,
-    body: String,
-    preview: String,
-    placeholders: Vec<String>,
-}
-
-enum PromptDisplayRow {
-    GroupHeader(String),
-    Item(usize), // index into prompts vec
-}
-
-fn build_prompt_display_rows(prompts: &[Prompt]) -> Vec<PromptDisplayRow> {
-    let mut rows = Vec::new();
-    // Ungrouped prompts first
-    for (i, p) in prompts.iter().enumerate() {
-        if p.group.is_none() {
-            rows.push(PromptDisplayRow::Item(i));
-        }
-    }
-    // Then grouped, sorted by group name
-    let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    for (i, p) in prompts.iter().enumerate() {
-        if let Some(g) = &p.group {
-            groups.entry(g.clone()).or_default().push(i);
-        }
-    }
-    for (group_name, indices) in groups {
-        rows.push(PromptDisplayRow::GroupHeader(group_name));
-        for i in indices {
-            rows.push(PromptDisplayRow::Item(i));
-        }
-    }
-    rows
-}
 
 struct MemoryFile {
     name: String,
@@ -320,7 +280,6 @@ enum ProjectTab {
     Home,
     Config,
     Issues,
-    Prompts,
     Memories,
     Agents,
     Pane,
@@ -429,17 +388,6 @@ enum MemoriesView {
     Gemini,  // ~/.gemini/GEMINI.md (global, single file)
 }
 
-#[derive(PartialEq, Clone)]
-enum PromptsView {
-    Global,
-    Project,
-}
-
-#[derive(PartialEq, Clone)]
-enum HomeEditField {
-    Description,
-    Homepage,
-}
 
 #[derive(PartialEq)]
 enum Screen {
@@ -453,12 +401,6 @@ struct Skill {
     name: String,
     source: String,
     description: String,
-}
-
-struct RegistrySkill {
-    name: String,
-    source: String,
-    installs: u64,
 }
 
 struct McpServer {
@@ -507,24 +449,6 @@ struct HomeData {
     mcp_ready: bool,
     sessions_count: usize,
     skills_count: usize,
-}
-
-fn md_frontmatter_status(path: &Path) -> (SetupStatus, Option<String>) {
-    if !path.exists() {
-        return (SetupStatus::Missing, None);
-    }
-    let (status, updated) = read_frontmatter(path);
-    let s = match status.as_deref() {
-        Some("template") => SetupStatus::Template,
-        Some("stale")    => SetupStatus::Stale,
-        Some("complete") => SetupStatus::Ok,
-        _                => SetupStatus::Ok,
-    };
-    (s, updated)
-}
-
-fn setup_item_present(items: &[SetupItem], label: &str) -> bool {
-    items.iter().any(|item| item.label == label && item.status == SetupStatus::Ok)
 }
 
 fn setup_template_count(items: &[SetupItem]) -> usize {
@@ -746,50 +670,6 @@ impl SetupStatus {
     }
 }
 
-enum SetupAction {
-    Apply,
-    Reset,
-    Delete,
-}
-
-enum SetupRenderRow {
-    GroupHeader(&'static str),
-    Item(usize), // index into setup_items
-}
-
-fn setup_render_rows(items: &[SetupItem]) -> Vec<SetupRenderRow> {
-    let mut rows = vec![];
-    for (label, category) in [
-        ("initialization", SetupCategory::Initialization),
-        ("recommended files", SetupCategory::Recommended),
-        ("repair", SetupCategory::Repair),
-    ] {
-        let indices: Vec<usize> = items
-            .iter()
-            .enumerate()
-            .filter_map(|(i, it)| (it.category == category).then_some(i))
-            .collect();
-        if indices.is_empty() {
-            continue;
-        }
-        rows.push(SetupRenderRow::GroupHeader(label));
-        for i in indices {
-            rows.push(SetupRenderRow::Item(i));
-        }
-    }
-    rows
-}
-
-// Returns the setup_items index for the currently selected render row, if it is an Item.
-fn selected_setup_item(items: &[SetupItem], list_state: &ListState) -> Option<usize> {
-    let sel = list_state.selected()?;
-    let rows = setup_render_rows(items);
-    match rows.get(sel)? {
-        SetupRenderRow::Item(i) => Some(*i),
-        SetupRenderRow::GroupHeader(_) => None,
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SetupCategory {
     Initialization,
@@ -815,46 +695,6 @@ struct SetupItem {
     status: SetupStatus,
     gitignore_path: Option<&'static str>,  // entry in .gitignore, None if not toggleable
     gitignored: bool,                       // currently present in # Pemguin TUI block
-}
-
-fn read_frontmatter(path: &Path) -> (Option<String>, Option<String>) {
-    // returns (status, updated)
-    let content = match fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(_) => return (None, None),
-    };
-    let mut lines = content.lines();
-    if lines.next().map(|l| l.trim()) != Some("---") {
-        return (None, None);
-    }
-    let mut status = None;
-    let mut updated = None;
-    for line in lines {
-        if line.trim() == "---" { break; }
-        if let Some(rest) = line.strip_prefix("status:") {
-            status = Some(rest.trim().to_string());
-        }
-        if let Some(rest) = line.strip_prefix("updated:") {
-            updated = Some(rest.trim().to_string());
-        }
-    }
-    (status, updated)
-}
-
-fn read_frontmatter_status(path: &Path) -> Option<String> {
-    read_frontmatter(path).0
-}
-
-fn md_file_status(path: &Path, base_detail: &str) -> (SetupStatus, String) {
-    if !path.exists() {
-        return (SetupStatus::Missing, base_detail.to_string());
-    }
-    match read_frontmatter_status(path).as_deref() {
-        Some("template") => (SetupStatus::Template, format!("{base_detail} — template")),
-        Some("stale")    => (SetupStatus::Stale,    format!("{base_detail} — stale")),
-        Some("complete") => (SetupStatus::Ok,        base_detail.to_string()),
-        _                => (SetupStatus::Ok,        base_detail.to_string()),
-    }
 }
 
 fn scan_setup(path: &Path) -> Vec<SetupItem> {
@@ -927,53 +767,9 @@ fn setup_item_edit_path(project_path: &Path, item: &SetupItem) -> Option<PathBuf
     }
 }
 
-enum PromptState {
-    Browse {
-        list_state: ListState,
-    },
-    Fill {
-        prompt_idx: usize,
-        field_idx: usize,
-        values: HashMap<String, String>,
-        input: String,
-    },
-    Done(String),
-}
-
-enum DeleteTarget {
-    Prompt {
-        path: PathBuf,
-        name: String,
-    },
-    Memory {
-        path: PathBuf,
-        name: String,
-    },
-    Setup {
-        project_path: PathBuf,
-        item: SetupItem,
-    },
-}
-
-struct DeleteConfirm {
-    title: String,
-    detail: String,
-    target: DeleteTarget,
-}
-
 struct App {
     config: Config,
     screen: Screen,
-    // Prompts
-    global_prompts: Vec<Prompt>, // always loaded from $PEMGUIN_DIR/prompts
-    project_prompts: Vec<Prompt>, // loaded from <project>/.pemguin/prompts/ on drill-in
-    prompts_view: PromptsView,
-    prompts: Vec<Prompt>, // current display list (points at global or project)
-    prompt_display_rows: Vec<PromptDisplayRow>, // flat + grouped rows for rendering
-    prompt_state: PromptState,
-    prompt_input: String,
-    prompt_inputting: bool,
-    prompt_message: Option<String>,
     // Issues
     issues: Vec<Issue>,
     issue_list_state: ListState,
@@ -993,8 +789,6 @@ struct App {
     home_remote_loaded: bool,
     home_loading: bool,
     home_readme_scroll: u16,
-    home_edit: Option<HomeEditField>,
-    home_edit_input: String,
     home_save_msg: Option<String>,
     // Setup (project sub-screen)
     setup_items: Vec<SetupItem>,
@@ -1016,20 +810,11 @@ struct App {
     memory_inputting: bool,
     pending_editor: Option<PathBuf>,
     text_editor: Option<TextEditorState>,
-    pending_delete: Option<DeleteConfirm>,
     pending_command: Option<ExternalCommand>,
     // Skills
     skills: Vec<Skill>,
     skills_list_state: ListState,
     skills_loaded: bool,
-    skills_registry: Vec<RegistrySkill>,
-    skills_registry_loaded: bool,
-    skills_registry_loading: bool,
-    skills_browse: bool,
-    skills_browse_query: String,
-    skills_browse_query_active: bool,
-    skills_browse_list_state: ListState,
-    skills_browse_indices: Vec<usize>,
     skills_install_message: Option<String>,
     // MCP
     agent_section: AgentSection,
@@ -1070,11 +855,6 @@ enum AsyncResult {
         generation: u64,
         projects: Vec<Project>,
     },
-    Registry(Vec<RegistrySkill>),
-    SkillInstalled {
-        name: String,
-        result: Result<String, String>,
-    },
 }
 
 // ── Prompt loading ────────────────────────────────────────────────────────────
@@ -1086,90 +866,6 @@ fn expand_tilde(s: &str) -> String {
         }
     }
     s.to_string()
-}
-
-fn load_prompts_from(dir: &Path) -> Vec<Prompt> {
-    if !dir.is_dir() {
-        return vec![];
-    }
-
-    let re = Regex::new(r"\{([A-Z][A-Z0-9_]*)\}").unwrap();
-    let mut entries: Vec<_> = fs::read_dir(dir)
-        .map(|r| r.filter_map(|e| e.ok()).collect())
-        .unwrap_or_default();
-    entries.sort_by_key(|e: &std::fs::DirEntry| e.file_name());
-
-    let parse_prompt = |path: &std::path::Path, group: Option<String>| -> Option<Prompt> {
-        if path.extension().and_then(|s| s.to_str()) != Some("md") {
-            return None;
-        }
-        let name = path.file_stem()?.to_str()?.to_string();
-        let content = fs::read_to_string(path).ok()?;
-        let body = extract_body(&content);
-        let mut placeholders: Vec<String> = Vec::new();
-        for cap in re.captures_iter(&body) {
-            let p = cap[1].to_string();
-            if !placeholders.contains(&p) {
-                placeholders.push(p);
-            }
-        }
-        Some(Prompt { name, group, body, preview: content, placeholders })
-    };
-
-    let mut prompts = Vec::new();
-
-    // Root-level .md files — ungrouped
-    for entry in entries.iter().filter(|e| e.path().is_file()) {
-        if let Some(p) = parse_prompt(&entry.path(), None) {
-            prompts.push(p);
-        }
-    }
-
-    // Subdirectories — each dir name becomes a group
-    for entry in entries.iter().filter(|e| e.path().is_dir()) {
-        let group_name = entry.file_name().to_string_lossy().into_owned();
-        let mut subentries: Vec<_> = fs::read_dir(entry.path())
-            .map(|r| r.filter_map(|e| e.ok()).collect())
-            .unwrap_or_default();
-        subentries.sort_by_key(|e: &std::fs::DirEntry| e.file_name());
-        for subentry in subentries.iter().filter(|e| e.path().is_file()) {
-            if let Some(p) = parse_prompt(&subentry.path(), Some(group_name.clone())) {
-                prompts.push(p);
-            }
-        }
-    }
-
-    prompts
-}
-
-fn global_prompts_dir() -> PathBuf {
-    dirs_home()
-        .unwrap_or_default()
-        .join(".pemguin")
-        .join("prompts")
-}
-
-fn extract_body(content: &str) -> String {
-    let mut in_block = false;
-    let mut block: Vec<&str> = Vec::new();
-    for line in content.lines() {
-        if line.starts_with("```") && !in_block {
-            in_block = true;
-            continue;
-        }
-        if line.starts_with("```") && in_block {
-            if !block.is_empty() {
-                return block.join("\n");
-            }
-            in_block = false;
-            block.clear();
-            continue;
-        }
-        if in_block {
-            block.push(line);
-        }
-    }
-    content.to_string()
 }
 
 // ── Issue loading ─────────────────────────────────────────────────────────────
@@ -1858,140 +1554,6 @@ fn load_skills(path: &Path) -> Vec<Skill> {
     skills
 }
 
-fn parse_registry_skills(arr: Vec<serde_json::Value>) -> Vec<RegistrySkill> {
-    let mut skills: Vec<RegistrySkill> = arr
-        .iter()
-        .filter_map(|v| {
-            Some(RegistrySkill {
-                name: v.get("name")?.as_str()?.to_string(),
-                source: v.get("source")?.as_str()?.to_string(),
-                installs: v.get("installs")?.as_u64().unwrap_or(0),
-            })
-        })
-        .collect();
-    skills.sort_by(|a, b| b.installs.cmp(&a.installs));
-    skills
-}
-
-fn fetch_skills_registry() -> Vec<RegistrySkill> {
-    let body = match ureq::get("https://skills.sh/")
-        .set("User-Agent", "pemguin/1.0")
-        .call()
-    {
-        Ok(resp) => match resp.into_string() {
-            Ok(s) => s,
-            Err(_) => return vec![],
-        },
-        Err(_) => return vec![],
-    };
-
-    // Try plain JSON form first: "initialSkills":[...]
-    let plain = "\"initialSkills\":";
-    if let Some(start) = body.find(plain) {
-        if let Some(json_str) = extract_json_value(&body[start + plain.len()..]) {
-            if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
-                return parse_registry_skills(arr);
-            }
-        }
-    }
-
-    // Try RSC escaped form: \"initialSkills\":
-    let escaped = "\\\"initialSkills\\\":";
-    if let Some(start) = body.find(escaped) {
-        let slice = &body[start + escaped.len()..];
-        // Find opening '[' within a short window
-        if let Some(bracket) = slice[..slice.len().min(10)].find('[') {
-            if let Some(raw) = extract_escaped_json_array(&slice[bracket..]) {
-                let unescaped = raw.replace("\\\"", "\"").replace("\\\\", "\\");
-                if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&unescaped) {
-                    return parse_registry_skills(arr);
-                }
-            }
-        }
-    }
-
-    vec![]
-}
-
-// Extracts a JSON array from RSC-escaped content where all " are written as \"
-fn extract_escaped_json_array(s: &str) -> Option<String> {
-    let mut depth = 0i32;
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' && i + 1 < bytes.len() {
-            i += 2; // skip escape sequence
-            continue;
-        }
-        match bytes[i] {
-            b'[' => depth += 1,
-            b']' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(s[..=i].to_string());
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
-fn extract_json_value(s: &str) -> Option<String> {
-    let first = s.chars().next()?;
-    let (open, close) = match first {
-        '[' => ('[', ']'),
-        '{' => ('{', '}'),
-        _ => return None,
-    };
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escape = false;
-    for (i, c) in s.char_indices() {
-        if escape {
-            escape = false;
-            continue;
-        }
-        if in_string {
-            if c == '\\' {
-                escape = true;
-            } else if c == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        if c == '"' {
-            in_string = true;
-            continue;
-        }
-        if c == open {
-            depth += 1;
-        } else if c == close {
-            depth -= 1;
-            if depth == 0 {
-                return Some(s[..=i].to_string());
-            }
-        }
-    }
-    None
-}
-
-fn filter_registry(registry: &[RegistrySkill], query: &str) -> Vec<usize> {
-    if query.is_empty() {
-        return (0..registry.len()).collect();
-    }
-    let q = query.to_lowercase();
-    registry
-        .iter()
-        .enumerate()
-        .filter(|(_, s)| {
-            s.name.to_lowercase().contains(&q) || s.source.to_lowercase().contains(&q)
-        })
-        .map(|(i, _)| i)
-        .collect()
-}
-
 fn load_mcp_servers(path: &Path) -> Vec<McpServer> {
     let mcp_path = path.join(".mcp.json");
     let content = match fs::read_to_string(&mcp_path) {
@@ -2620,12 +2182,7 @@ impl App {
         let (async_tx, async_rx) = mpsc::channel();
         let projects = vec![];
         let project_entries = vec![];
-        let global_prompts = vec![];
-        let init_display_rows = vec![];
 
-        let mut prompt_ls = ListState::default();
-        let first_prompt = init_display_rows.iter().position(|r| matches!(r, PromptDisplayRow::Item(_)));
-        prompt_ls.select(first_prompt);
         let mut project_ls = TableState::default();
         if let Some(first_item) = project_entries
             .iter()
@@ -2638,21 +2195,9 @@ impl App {
         let mut pane_ls = ListState::default();
         pane_ls.select(Some(0));
 
-        let prompts = vec![];
         let mut app = App {
             config,
             screen: Screen::Projects,
-            global_prompts,
-            project_prompts: vec![],
-            prompts_view: PromptsView::Global,
-            prompts,
-            prompt_display_rows: init_display_rows,
-            prompt_state: PromptState::Browse {
-                list_state: prompt_ls,
-            },
-            prompt_input: String::new(),
-            prompt_inputting: false,
-            prompt_message: None,
             issues: vec![],
             issue_list_state: ListState::default(),
             issues_error: None,
@@ -2669,8 +2214,6 @@ impl App {
             home_remote_loaded: false,
             home_loading: false,
             home_readme_scroll: 0,
-            home_edit: None,
-            home_edit_input: String::new(),
             home_save_msg: None,
             setup_items: vec![],
             setup_list_state: setup_ls,
@@ -2688,7 +2231,6 @@ impl App {
             memory_inputting: false,
             pending_editor: None,
             text_editor: None,
-            pending_delete: None,
             pending_command: None,
             skills: vec![],
             skills_list_state: {
@@ -2697,14 +2239,6 @@ impl App {
                 s
             },
             skills_loaded: false,
-            skills_registry: vec![],
-            skills_registry_loaded: false,
-            skills_registry_loading: false,
-            skills_browse: false,
-            skills_browse_query: String::new(),
-            skills_browse_query_active: false,
-            skills_browse_list_state: ListState::default(),
-            skills_browse_indices: vec![],
             skills_install_message: None,
             agent_section: AgentSection::Mcp,
             mcp_servers: vec![],
@@ -2732,40 +2266,12 @@ impl App {
         app
     }
 
-    fn switch_prompts_view(&mut self, view: PromptsView) {
-        self.prompts_view = view.clone();
-        self.prompts = match view {
-            PromptsView::Global => self.global_prompts.clone(),
-            PromptsView::Project => self.project_prompts.clone(),
-        };
-        self.prompt_display_rows = build_prompt_display_rows(&self.prompts);
-        let mut ls = ListState::default();
-        let first = self.prompt_display_rows.iter().position(|r| matches!(r, PromptDisplayRow::Item(_)));
-        ls.select(first);
-        self.prompt_state = PromptState::Browse { list_state: ls };
-        self.prompt_message = None;
-    }
-
-    fn reload_project_prompts(&mut self) {
-        if let Some(idx) = self.active_project_idx {
-            if let Some(p) = self.projects.get(idx) {
-                let dir = p.path.join(".pemguin").join("prompts");
-                self.project_prompts = load_prompts_from(&dir);
-                if self.prompts_view == PromptsView::Project {
-                    self.prompts = self.project_prompts.clone();
-                    self.prompt_display_rows = build_prompt_display_rows(&self.prompts);
-                }
-            }
-        }
-    }
-
     fn open_text_editor(&mut self, path: PathBuf) {
         match load_editor_state(&path) {
             Ok(editor) => {
                 self.text_editor = Some(editor);
             }
             Err(e) => {
-                self.prompt_message = Some(format!("Error: {e}"));
                 self.setup_message = Some(format!("Error: {e}"));
                 self.memory_message = Some(format!("Error: {e}"));
             }
@@ -2777,13 +2283,9 @@ impl App {
             if let Some(p) = self.projects.get(idx) {
                 let path = p.path.clone();
                 self.setup_items = scan_setup(&path);
-                // Select the first real Item row (skip GroupHeader)
-                let first = setup_render_rows(&self.setup_items)
-                    .iter()
-                    .position(|r| matches!(r, SetupRenderRow::Item(_)));
-                self.setup_list_state.select(first);
-                // Reload project prompts in case project prompt dir was just created
-                self.reload_project_prompts();
+                if !self.setup_items.is_empty() {
+                    self.setup_list_state.select(Some(0));
+                }
             }
         } else {
             self.setup_items = vec![];
@@ -2830,34 +2332,6 @@ impl App {
         self.setup_on_open = false;
     }
 
-    fn auto_values(&self) -> HashMap<String, String> {
-        let mut map = HashMap::new();
-        if !self.repo.is_empty() {
-            map.insert("REPO".to_string(), self.repo.clone());
-        }
-        map
-    }
-
-    fn selected_prompt_idx(&self) -> Option<usize> {
-        if let PromptState::Browse { list_state } = &self.prompt_state {
-            let display_idx = list_state.selected()?;
-            match self.prompt_display_rows.get(display_idx)? {
-                PromptDisplayRow::Item(i) => Some(*i),
-                PromptDisplayRow::GroupHeader(_) => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    fn issue_prompt_body(&self) -> String {
-        self.prompts
-            .iter()
-            .find(|p| p.name.contains("issue") || p.name.contains("work-on"))
-            .map(|p| p.body.clone())
-            .unwrap_or_else(|| DEFAULT_ISSUE_PROMPT.to_string())
-    }
-
     fn switch_project(&mut self, idx: usize) {
         let Some(project) = self.projects.get(idx) else {
             return;
@@ -2866,14 +2340,6 @@ impl App {
         self.context = make_context(&project.repo, &project.branch);
         self.active_project_idx = Some(idx);
         let path = project.path.clone();
-        // Load project-local prompts; default to project view if any exist
-        self.project_prompts = load_prompts_from(&path.join(".pemguin").join("prompts"));
-        let view = if !self.project_prompts.is_empty() {
-            PromptsView::Project
-        } else {
-            PromptsView::Global
-        };
-        self.switch_prompts_view(view);
         // Load only cheap local data on project open; heavier tab data loads lazily.
         self.home_data = Some(load_home_data_local(&path, &self.repo.clone()));
         self.home_remote_loaded = false;
@@ -2910,13 +2376,8 @@ impl App {
         self.sessions_message = None;
         let repo = self.repo.clone();
         self.start_home_load(&path, &repo);
-        // Drill in
         self.setup_on_open = false;
-        self.screen = Screen::InProject(if self.setup_on_open {
-            ProjectTab::Config
-        } else {
-            ProjectTab::Home
-        });
+        self.screen = Screen::InProject(ProjectTab::Home);
     }
 
     fn ensure_tab_loaded(&mut self, tab: &ProjectTab) {
@@ -3107,29 +2568,6 @@ impl App {
                             Some(format!("{} projects loaded", self.projects.len()));
                     }
                 }
-                AsyncResult::Registry(skills) => {
-                    self.skills_registry = skills;
-                    self.skills_registry_loaded = true;
-                    self.skills_registry_loading = false;
-                    self.skills_browse_indices = (0..self.skills_registry.len()).collect();
-                    let mut ls = ListState::default();
-                    if !self.skills_registry.is_empty() {
-                        ls.select(Some(0));
-                    }
-                    self.skills_browse_list_state = ls;
-                }
-                AsyncResult::SkillInstalled { name, result } => {
-                    match result {
-                        Ok(msg) => {
-                            self.skills_install_message = Some(msg);
-                            self.skills_loaded = false; // trigger reload
-                        }
-                        Err(e) => {
-                            self.skills_install_message = Some(format!("Error: {e}"));
-                        }
-                    }
-                    let _ = name;
-                }
             }
         }
     }
@@ -3184,18 +2622,12 @@ fn make_context(repo: &str, branch: &str) -> String {
     }
 }
 
-const DEFAULT_ISSUE_PROMPT: &str = "Work on issue #{ISSUE} in {REPO}.\n\nBefore writing any code:\n1. Read AGENT.md and SPEC.md in the project root\n2. Read the issue in full: gh issue view {ISSUE}\n3. Identify only the files relevant to the issue\n\nDo the work. Then:\n1. Run vp check — fix any errors before committing\n2. Run vp build — must succeed\n3. Commit: \"fix: <description> (closes #{ISSUE})\"\n\nDo not close the issue. Do not open a PR. Stop after the commit.";
-
-const MEMORY_INDEX_TEMPLATE: &str = "# Memory Index\n\nAgent memory for this project. Read this first, then load only the files relevant to the current task.\n\n> Format: `- [filename.md](filename.md) — one-line description`\n\n<!-- add entries below as memories are created -->\n";
 
 // ── Event handling ────────────────────────────────────────────────────────────
 
 fn handle_key(app: &mut App, key: KeyCode, modifiers: KeyModifiers) -> bool {
     if app.text_editor.is_some() {
         return handle_text_editor(app, key, modifiers);
-    }
-    if app.pending_delete.is_some() {
-        return handle_delete_confirm(app, key);
     }
     if matches!(&app.sessions_state, SessionsState::Summary { .. })
         && matches!(&app.screen, Screen::InProject(ProjectTab::Agents))
@@ -3209,13 +2641,7 @@ fn handle_key(app: &mut App, key: KeyCode, modifiers: KeyModifiers) -> bool {
     match &app.screen {
         Screen::Projects => handle_projects(app, key),
         Screen::InProject(_) => {
-            // Fill/Done, home-edit, and memory-input capture all keys before global nav
-            let in_flow = matches!(
-                &app.prompt_state,
-                PromptState::Fill { .. } | PromptState::Done(_)
-            ) || app.home_edit.is_some()
-                || app.memory_inputting
-                || app.prompt_inputting;
+            let in_flow = app.memory_inputting;
             if !in_flow {
                 match key {
                     KeyCode::Esc => {
@@ -3227,8 +2653,7 @@ fn handle_key(app: &mut App, key: KeyCode, modifiers: KeyModifiers) -> bool {
                         let next = match &app.screen {
                             Screen::InProject(ProjectTab::Home) => ProjectTab::Config,
                             Screen::InProject(ProjectTab::Config) => ProjectTab::Issues,
-                            Screen::InProject(ProjectTab::Issues) => ProjectTab::Prompts,
-                            Screen::InProject(ProjectTab::Prompts) => ProjectTab::Memories,
+                            Screen::InProject(ProjectTab::Issues) => ProjectTab::Memories,
                             Screen::InProject(ProjectTab::Memories) => ProjectTab::Agents,
                             Screen::InProject(ProjectTab::Agents) => ProjectTab::Pane,
                             Screen::InProject(ProjectTab::Pane) => ProjectTab::Home,
@@ -3250,18 +2675,14 @@ fn handle_key(app: &mut App, key: KeyCode, modifiers: KeyModifiers) -> bool {
                         return false;
                     }
                     KeyCode::Char('4') => {
-                        app.set_project_tab(ProjectTab::Prompts);
-                        return false;
-                    }
-                    KeyCode::Char('5') => {
                         app.set_project_tab(ProjectTab::Memories);
                         return false;
                     }
-                    KeyCode::Char('6') => {
+                    KeyCode::Char('5') => {
                         app.set_project_tab(ProjectTab::Agents);
                         return false;
                     }
-                    KeyCode::Char('7') => {
+                    KeyCode::Char('6') => {
                         app.set_project_tab(ProjectTab::Pane);
                         return false;
                     }
@@ -3278,7 +2699,6 @@ fn handle_key(app: &mut App, key: KeyCode, modifiers: KeyModifiers) -> bool {
                 ProjectTab::Home => handle_home(app, key),
                 ProjectTab::Config => handle_setup(app, key),
                 ProjectTab::Issues => handle_issues(app, key),
-                ProjectTab::Prompts => handle_prompts(app, key),
                 ProjectTab::Memories => handle_memories(app, key),
                 ProjectTab::Agents => handle_agents(app, key),
                 ProjectTab::Pane => handle_pane(app, key),
@@ -3287,189 +2707,7 @@ fn handle_key(app: &mut App, key: KeyCode, modifiers: KeyModifiers) -> bool {
     }
 }
 
-fn handle_prompts(app: &mut App, key: KeyCode) -> bool {
-    if app.prompt_inputting {
-        match key {
-            KeyCode::Esc => {
-                app.prompt_inputting = false;
-                app.prompt_input.clear();
-            }
-            KeyCode::Backspace => {
-                app.prompt_input.pop();
-            }
-            KeyCode::Char(c) => {
-                app.prompt_input.push(c);
-            }
-            KeyCode::Enter => {
-                app.prompt_message = Some("Read-only: pemguin does not create or store prompts.".to_string());
-                app.prompt_inputting = false;
-                app.prompt_input.clear();
-            }
-            _ => {}
-        }
-        return false;
-    }
-
-    // Subnav: g = global, p = project
-    if matches!(&app.prompt_state, PromptState::Browse { .. }) {
-        match key {
-            KeyCode::Char('g') => {
-                app.switch_prompts_view(PromptsView::Global);
-                return false;
-            }
-            KeyCode::Char('p') => {
-                app.switch_prompts_view(PromptsView::Project);
-                return false;
-            }
-            _ => {}
-        }
-    }
-
-    let auto = app.auto_values();
-    let fillable_cache: Vec<String> =
-        if let PromptState::Fill { prompt_idx, .. } = &app.prompt_state {
-            let idx = *prompt_idx;
-            app.prompts[idx]
-                .placeholders
-                .iter()
-                .filter(|p| !auto.contains_key(*p))
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        };
-
-    match &mut app.prompt_state {
-        PromptState::Browse { list_state } => {
-            let len = app.prompt_display_rows.len();
-            match key {
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if len > 0 {
-                        let mut n = (list_state.selected().unwrap_or(0) + 1) % len;
-                        let mut guard = 0;
-                        while matches!(app.prompt_display_rows.get(n), Some(PromptDisplayRow::GroupHeader(_))) && guard < len {
-                            n = (n + 1) % len;
-                            guard += 1;
-                        }
-                        list_state.select(Some(n));
-                    }
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if len > 0 {
-                        let current = list_state.selected().unwrap_or(0);
-                        let mut n = if current == 0 { len - 1 } else { current - 1 };
-                        let mut guard = 0;
-                        while matches!(app.prompt_display_rows.get(n), Some(PromptDisplayRow::GroupHeader(_))) && guard < len {
-                            n = if n == 0 { len - 1 } else { n - 1 };
-                            guard += 1;
-                        }
-                        list_state.select(Some(n));
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Some(idx) = list_state.selected() {
-                        let prompt = &app.prompts[idx];
-                        let fillable: Vec<String> = prompt
-                            .placeholders
-                            .iter()
-                            .filter(|p| !auto.contains_key(*p))
-                            .cloned()
-                            .collect();
-                        if fillable.is_empty() {
-                            let filled = fill(&prompt.body, &auto);
-                            copy_to_clipboard(&filled);
-                            app.prompt_state = PromptState::Done(filled);
-                        } else {
-                            app.prompt_state = PromptState::Fill {
-                                prompt_idx: idx,
-                                field_idx: 0,
-                                values: auto.clone(),
-                                input: String::new(),
-                            };
-                        }
-                    }
-                }
-                KeyCode::Char('n') | KeyCode::Char('e') | KeyCode::Char('d') if app.prompts_view == PromptsView::Project => {
-                    app.prompt_message = Some("Read-only: pemguin observes legacy prompts but does not create, edit, or delete them.".to_string());
-                }
-                KeyCode::Char('r') if app.prompts_view == PromptsView::Project => {
-                    app.reload_project_prompts();
-                    app.switch_prompts_view(PromptsView::Project);
-                    app.prompt_message = None;
-                }
-                _ => {}
-            }
-        }
-        PromptState::Fill {
-            prompt_idx,
-            field_idx,
-            values,
-            input,
-        } => {
-            let fillable = &fillable_cache;
-            match key {
-                KeyCode::Esc => {
-                    let idx = *prompt_idx;
-                    let mut ls = ListState::default();
-                    ls.select(Some(idx));
-                    app.prompt_state = PromptState::Browse { list_state: ls };
-                }
-                KeyCode::Backspace => {
-                    input.pop();
-                }
-                KeyCode::Char(c) => {
-                    input.push(c);
-                }
-                KeyCode::Enter => {
-                    if *field_idx < fillable.len() {
-                        values.insert(fillable[*field_idx].clone(), input.clone());
-                        *input = String::new();
-                        *field_idx += 1;
-                        if *field_idx >= fillable.len() {
-                            let v = values.clone();
-                            let b = app.prompts[*prompt_idx].body.clone();
-                            let filled = fill(&b, &v);
-                            copy_to_clipboard(&filled);
-                            app.prompt_state = PromptState::Done(filled);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        PromptState::Done(_) => {
-            let mut ls = ListState::default();
-            ls.select(Some(0));
-            app.prompt_state = PromptState::Browse { list_state: ls };
-        }
-    }
-    false
-}
-
 fn handle_home(app: &mut App, key: KeyCode) -> bool {
-    // Edit mode: capture all keys
-    if let Some(field) = app.home_edit.clone() {
-        match key {
-            KeyCode::Esc => {
-                app.home_edit = None;
-                app.home_edit_input.clear();
-            }
-            KeyCode::Backspace => {
-                app.home_edit_input.pop();
-            }
-            KeyCode::Char(c) => {
-                app.home_edit_input.push(c);
-            }
-            KeyCode::Enter => {
-                app.home_save_msg = Some("Read-only: pemguin observes GitHub metadata but does not edit it.".to_string());
-                app.home_edit = None;
-                app.home_edit_input.clear();
-            }
-            _ => {}
-        }
-        return false;
-    }
-
     match key {
         KeyCode::Char('i') => {
             app.set_project_tab(ProjectTab::Config);
@@ -3526,13 +2764,7 @@ fn handle_issues(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Enter => {
             if let Some(idx) = app.issue_list_state.selected() {
                 let number = app.issues[idx].number.to_string();
-                let body = app.issue_prompt_body();
-                let mut values = app.auto_values();
-                values.insert("ISSUE".to_string(), number);
-                let filled = fill(&body, &values);
-                copy_to_clipboard(&filled);
-                app.screen = Screen::InProject(ProjectTab::Prompts);
-                app.prompt_state = PromptState::Done(filled);
+                copy_to_clipboard(&number);
             }
         }
         KeyCode::Char('r') => {
@@ -3613,67 +2845,10 @@ fn handle_projects(app: &mut App, key: KeyCode) -> bool {
     false
 }
 
-fn fill(body: &str, values: &HashMap<String, String>) -> String {
-    let mut r = body.to_string();
-    for (k, v) in values {
-        r = r.replace(&format!("{{{k}}}"), v);
-    }
-    r
-}
-
 fn copy_to_clipboard(text: &str) {
     if let Ok(mut cb) = Clipboard::new() {
         let _ = cb.set_text(text);
     }
-}
-
-fn centered_rect(width: u16, height: u16, area: ratatui::layout::Rect) -> ratatui::layout::Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(height.min(area.height)),
-            Constraint::Fill(1),
-        ])
-        .split(area);
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(width.min(area.width)),
-            Constraint::Fill(1),
-        ])
-        .split(vertical[1]);
-    horizontal[1]
-}
-
-fn execute_delete(app: &mut App, confirm: DeleteConfirm) {
-    match confirm.target {
-        DeleteTarget::Prompt { .. } => {
-            app.prompt_message = Some("Read-only: pemguin does not delete prompts.".to_string());
-        }
-        DeleteTarget::Memory { .. } => {
-            app.memory_message = Some("Read-only: pemguin does not delete memories.".to_string());
-        }
-        DeleteTarget::Setup { .. } => {
-            app.setup_message = Some("Read-only: pemguin does not delete context files.".to_string());
-        }
-    }
-}
-
-fn handle_delete_confirm(app: &mut App, key: KeyCode) -> bool {
-    match key {
-        KeyCode::Esc | KeyCode::Char('n') => {
-            app.pending_delete = None;
-        }
-        KeyCode::Enter | KeyCode::Char('y') => {
-            if let Some(confirm) = app.pending_delete.take() {
-                execute_delete(app, confirm);
-            }
-        }
-        _ => {}
-    }
-    false
 }
 
 // ── Drawing ───────────────────────────────────────────────────────────────────
@@ -3683,30 +2858,15 @@ fn draw(frame: &mut Frame, app: &App) {
         draw_text_editor(frame, editor);
         return;
     }
-    match (&app.screen, &app.prompt_state) {
-        (
-            _,
-            PromptState::Fill {
-                prompt_idx,
-                field_idx,
-                values,
-                input,
-            },
-        ) => draw_fill(frame, app, *prompt_idx, *field_idx, values, input),
-        (_, PromptState::Done(text)) => draw_done(frame, text),
-        (Screen::Projects, _) => draw_projects(frame, app),
-        (Screen::InProject(ProjectTab::Home), _) => draw_home(frame, app),
-        (Screen::InProject(ProjectTab::Config), _) => draw_setup(frame, app),
-        (Screen::InProject(ProjectTab::Issues), _) => draw_issues(frame, app),
-        (Screen::InProject(ProjectTab::Prompts), _) => draw_prompts(frame, app),
-        (Screen::InProject(ProjectTab::Memories), _) => draw_memories(frame, app),
-        (Screen::InProject(ProjectTab::Agents), _) if app.skills_browse => draw_skills(frame, app),
-        (Screen::InProject(ProjectTab::Agents), _) if !matches!(&app.sessions_state, SessionsState::List) => draw_sessions(frame, app),
-        (Screen::InProject(ProjectTab::Agents), _) => draw_agents(frame, app),
-        (Screen::InProject(ProjectTab::Pane), _) => draw_pane(frame, app),
-    }
-    if let Some(confirm) = &app.pending_delete {
-        draw_delete_confirm(frame, confirm);
+    match &app.screen {
+        Screen::Projects => draw_projects(frame, app),
+        Screen::InProject(ProjectTab::Home) => draw_home(frame, app),
+        Screen::InProject(ProjectTab::Config) => draw_setup(frame, app),
+        Screen::InProject(ProjectTab::Issues) => draw_issues(frame, app),
+        Screen::InProject(ProjectTab::Memories) => draw_memories(frame, app),
+        Screen::InProject(ProjectTab::Agents) if !matches!(&app.sessions_state, SessionsState::List) => draw_sessions(frame, app),
+        Screen::InProject(ProjectTab::Agents) => draw_agents(frame, app),
+        Screen::InProject(ProjectTab::Pane) => draw_pane(frame, app),
     }
 }
 
@@ -3794,10 +2954,9 @@ fn nav_row(app: &App) -> Line<'static> {
         ),
         (I_SETUP, "config", 2, *active_tab == ProjectTab::Config),
         (I_ISSUES, "issues", 3, *active_tab == ProjectTab::Issues),
-        (I_PROMPTS, "prompts", 4, *active_tab == ProjectTab::Prompts),
-        (I_MEMORY, "memories", 5, *active_tab == ProjectTab::Memories),
-        (I_MCP, "agents", 6, *active_tab == ProjectTab::Agents),
-        (I_PANE, "pane", 7, *active_tab == ProjectTab::Pane),
+        (I_MEMORY, "memories", 4, *active_tab == ProjectTab::Memories),
+        (I_MCP, "agents", 5, *active_tab == ProjectTab::Agents),
+        (I_PANE, "pane", 6, *active_tab == ProjectTab::Pane),
     ];
     for (icon, label, n, active) in tabs {
         spans.extend(tab_span(icon, label, *n, *active));
@@ -3808,7 +2967,7 @@ fn nav_row(app: &App) -> Line<'static> {
 
 fn draw_home(frame: &mut Frame, app: &App) {
     let area = frame.area();
-    let bottom_h = if app.home_edit.is_some() || app.home_save_msg.is_some() {
+    let bottom_h = if app.home_save_msg.is_some() {
         3u16
     } else {
         0
@@ -4140,26 +3299,7 @@ fn draw_home(frame: &mut Frame, app: &App) {
         );
     }
 
-    // Edit input or save message — keep exactly as before
-    if let Some(field) = &app.home_edit {
-        let label = match field {
-            HomeEditField::Description => "description",
-            HomeEditField::Homepage => "homepage url",
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("> ", Style::default().fg(theme().accent)),
-                Span::raw(app.home_edit_input.clone()),
-                Span::styled("█", Style::default().fg(theme().accent)),
-            ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL).border_type(BorderType::Rounded)
-                    .title(format!(" edit {label} ")),
-            ),
-            outer[3],
-        );
-    } else if let Some(msg) = &app.home_save_msg {
+    if let Some(msg) = &app.home_save_msg {
         let (icon, color) = if msg.starts_with("Error") {
             (I_CROSS, theme().red)
         } else {
@@ -4175,30 +3315,16 @@ fn draw_home(frame: &mut Frame, app: &App) {
         );
     }
 
-    let not_initialized = false;
-    let footer_hints = if app.home_edit.is_some() {
-        footer(&[("enter", "save"), ("esc", "cancel")])
-    } else if not_initialized {
-        footer(&[
-            ("i", "open config"),
+    frame.render_widget(
+        Paragraph::new(footer(&[
             ("c", "config"),
             ("r", "reload"),
-            ("e", "edit desc"),
-            ("y", "copy url"),
-            ("esc", "back"),
-        ])
-    } else {
-        footer(&[
-            ("c", "config"),
-            ("r", "reload"),
-            ("e", "edit desc"),
-            ("u", "edit homepage"),
             ("y", "copy url"),
             ("jk", "scroll readme"),
             ("esc", "back"),
-        ])
-    };
-    frame.render_widget(Paragraph::new(footer_hints), outer[4]);
+        ])),
+        outer[4],
+    );
 }
 
 fn footer(hints: &[(&'static str, &'static str)]) -> Line<'static> {
@@ -4221,157 +3347,6 @@ fn hl() -> Style {
         .fg(theme().sel_fg)
         .bg(theme().accent)
         .add_modifier(Modifier::BOLD)
-}
-
-fn draw_prompts(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-    let bottom_h = if app.prompt_inputting || app.prompt_message.is_some() {
-        3
-    } else {
-        1
-    };
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(bottom_h),
-        ])
-        .split(area);
-
-    frame.render_widget(Paragraph::new(header_row(app)), outer[0]);
-    frame.render_widget(Paragraph::new(nav_row(app)), outer[1]);
-
-    // Split left pane into subnav + list
-    let left_area = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-        .split(outer[2]);
-
-    let list_split = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0)])
-        .split(left_area[0]);
-
-    // Subnav
-    let global_active = app.prompts_view == PromptsView::Global;
-    let project_active = app.prompts_view == PromptsView::Project;
-    let has_project = !app.project_prompts.is_empty();
-    let subnav = Line::from(vec![
-        Span::styled(
-            " g global ",
-            if global_active {
-                Style::default()
-                    .fg(theme().sel_fg)
-                    .bg(theme().accent)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme().fg_dim)
-            },
-        ),
-        Span::raw(" "),
-        Span::styled(
-            " p project ",
-            if project_active {
-                Style::default()
-                    .fg(theme().sel_fg)
-                    .bg(theme().accent)
-                    .add_modifier(Modifier::BOLD)
-            } else if has_project {
-                Style::default().fg(theme().fg_dim)
-            } else {
-                Style::default().fg(theme().fg_xdim)
-            },
-        ),
-    ]);
-    frame.render_widget(Paragraph::new(subnav), list_split[0]);
-
-    let items: Vec<ListItem> = app.prompt_display_rows.iter().map(|row| match row {
-        PromptDisplayRow::GroupHeader(name) => ListItem::new(Line::from(vec![
-            Span::styled(
-                format!(" {name}"),
-                Style::default().fg(theme().fg_dim).add_modifier(Modifier::BOLD),
-            ),
-        ])),
-        PromptDisplayRow::Item(i) => ListItem::new(app.prompts[*i].name.clone()),
-    }).collect();
-    let empty_hint = if !project_active {
-        String::new()
-    } else {
-        " no legacy .pemguin/prompts/ observed ".to_string()
-    };
-    let block_title = if items.is_empty() && project_active {
-        empty_hint.as_str()
-    } else {
-        " prompts "
-    };
-    let mut ls = if let PromptState::Browse { list_state } = &app.prompt_state {
-        list_state.clone()
-    } else {
-        ListState::default()
-    };
-    frame.render_stateful_widget(
-        List::new(items)
-            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(block_title))
-            .highlight_style(hl())
-            .highlight_symbol("> "),
-        list_split[1],
-        &mut ls,
-    );
-
-    let preview = app
-        .selected_prompt_idx()
-        .and_then(|i| app.prompts.get(i))
-        .map(|p| p.preview.as_str())
-        .unwrap_or("");
-    frame.render_widget(
-        Paragraph::new(preview)
-            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" preview "))
-            .wrap(Wrap { trim: false }),
-        left_area[1],
-    );
-    if app.prompt_inputting {
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("> ", Style::default().fg(theme().accent)),
-                Span::raw(app.prompt_input.clone()),
-                Span::styled("█", Style::default().fg(theme().accent)),
-            ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL).border_type(BorderType::Rounded)
-                    .title(" new prompt name "),
-            ),
-            outer[3],
-        );
-    } else if let Some(msg) = &app.prompt_message {
-        let color = if msg.starts_with("Error:") {
-            theme().red
-        } else {
-            theme().green
-        };
-        frame.render_widget(
-            Paragraph::new(Span::styled(format!("  {msg}"), Style::default().fg(color)))
-                .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded)),
-            outer[3],
-        );
-    } else {
-        frame.render_widget(
-            Paragraph::new(footer(&[
-                ("g", "global"),
-                ("p", "project"),
-                ("↑↓/jk", "navigate"),
-                ("enter", "copy/fill"),
-                ("n", "new"),
-                ("e", "edit"),
-                ("d", "delete"),
-                ("r", "reload"),
-                ("esc", "back"),
-            ])),
-            outer[3],
-        );
-    }
 }
 
 fn draw_issues(frame: &mut Frame, app: &App) {
@@ -4833,6 +3808,35 @@ fn handle_memories(app: &mut App, key: KeyCode) -> bool {
         _ => {}
     }
     false
+}
+
+enum SetupRenderRow {
+    GroupHeader(String),
+    Item(usize),
+}
+
+fn setup_render_rows(items: &[SetupItem]) -> Vec<SetupRenderRow> {
+    let mut rows = Vec::new();
+    let mut last_cat: Option<&str> = None;
+    for (i, item) in items.iter().enumerate() {
+        let cat = item.category.as_str();
+        if last_cat != Some(cat) {
+            rows.push(SetupRenderRow::GroupHeader(cat.to_string()));
+            last_cat = Some(cat);
+        }
+        rows.push(SetupRenderRow::Item(i));
+    }
+    rows
+}
+
+fn selected_setup_item(items: &[SetupItem], ls: &ListState) -> Option<usize> {
+    let row_idx = ls.selected()?;
+    let rows = setup_render_rows(items);
+    if let Some(SetupRenderRow::Item(i)) = rows.get(row_idx) {
+        Some(*i)
+    } else {
+        None
+    }
 }
 
 fn handle_setup(app: &mut App, key: KeyCode) -> bool {
@@ -5527,244 +4531,6 @@ fn draw_agents(frame: &mut Frame, app: &App) {
         ]),
     };
     frame.render_widget(Paragraph::new(footer_line), outer[6]);
-}
-
-fn draw_skills(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-    let footer_h = if app.skills_browse && app.skills_install_message.is_some() { 3 } else { 1 };
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(footer_h),
-        ])
-        .split(area);
-
-    frame.render_widget(Paragraph::new(header_row(app)), outer[0]);
-    frame.render_widget(Paragraph::new(nav_row(app)), outer[1]);
-
-    if app.skills_browse {
-        // ── Browse mode ──────────────────────────────────────────────────
-        let browse_h = if app.skills_browse_query_active { 3 } else { 0 };
-        let inner = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(browse_h)])
-            .split(outer[2]);
-
-        let main = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-            .split(inner[0]);
-
-        if app.skills_registry_loading {
-            frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "  fetching skills.sh…",
-                        Style::default().fg(theme().fg_dim),
-                    )),
-                ])
-                .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" browse ")),
-                outer[2],
-            );
-        } else {
-            let items: Vec<ListItem> = app
-                .skills_browse_indices
-                .iter()
-                .filter_map(|&i| app.skills_registry.get(i))
-                .map(|s| ListItem::new(s.name.clone()))
-                .collect();
-
-            let title = if app.skills_browse_query.is_empty() {
-                format!(" browse ({}) ", app.skills_browse_indices.len())
-            } else {
-                format!(
-                    " browse — \"{}\" ({}) ",
-                    app.skills_browse_query,
-                    app.skills_browse_indices.len()
-                )
-            };
-
-            let mut ls = app.skills_browse_list_state.clone();
-            frame.render_stateful_widget(
-                List::new(items)
-                    .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(title))
-                    .highlight_style(hl())
-                    .highlight_symbol("> "),
-                main[0],
-                &mut ls,
-            );
-
-            let detail = app
-                .skills_browse_list_state
-                .selected()
-                .and_then(|i| app.skills_browse_indices.get(i))
-                .and_then(|&ri| app.skills_registry.get(ri))
-                .map(|s| {
-                    vec![
-                        Line::from(Span::styled(
-                            s.name.clone(),
-                            Style::default()
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD),
-                        )),
-                        Line::from(""),
-                        Line::from(vec![
-                            Span::styled("source   ", Style::default().fg(theme().fg_dim)),
-                            Span::raw(s.source.clone()),
-                        ]),
-                        Line::from(vec![
-                            Span::styled("installs ", Style::default().fg(theme().fg_dim)),
-                            Span::raw(format!("{}", s.installs)),
-                        ]),
-                        Line::from(""),
-                        Line::from(Span::styled(
-                            "press enter to install",
-                            Style::default().fg(theme().fg_xdim),
-                        )),
-                    ]
-                })
-                .unwrap_or_default();
-
-            frame.render_widget(
-                Paragraph::new(detail)
-                    .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" detail "))
-                    .wrap(Wrap { trim: false }),
-                main[1],
-            );
-
-            if app.skills_browse_query_active {
-                frame.render_widget(
-                    Paragraph::new(Line::from(vec![
-                        Span::styled("/", Style::default().fg(theme().accent)),
-                        Span::raw(app.skills_browse_query.clone()),
-                        Span::styled("█", Style::default().fg(theme().accent)),
-                    ]))
-                    .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" search ")),
-                    inner[1],
-                );
-            }
-        }
-
-        if let Some(msg) = &app.skills_install_message {
-            let (icon, color) = if msg.starts_with("Error") {
-                (I_CROSS, theme().red)
-            } else {
-                (I_CHECK, theme().green)
-            };
-            frame.render_widget(
-                Paragraph::new(Span::styled(
-                    format!("  {icon}  {msg}"),
-                    Style::default().fg(color),
-                ))
-                .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded)),
-                outer[3],
-            );
-        } else if app.skills_browse_query_active {
-            frame.render_widget(
-                Paragraph::new(footer(&[("esc", "cancel search"), ("enter", "confirm")])),
-                outer[3],
-            );
-        } else {
-            frame.render_widget(
-                Paragraph::new(footer(&[
-                    ("↑↓/jk", "navigate"),
-                    ("/", "search"),
-                    ("enter", "install"),
-                    ("esc", "installed view"),
-                ])),
-                outer[3],
-            );
-        }
-    } else {
-        // ── Installed view ───────────────────────────────────────────────
-        let main = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-            .split(outer[2]);
-
-        let items: Vec<ListItem> = app
-            .skills
-            .iter()
-            .map(|s| ListItem::new(s.name.clone()))
-            .collect();
-
-        if items.is_empty() {
-            frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "  no skills installed",
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "  press b to browse skills.sh",
-                        Style::default().fg(theme().fg_xdim),
-                    )),
-                ])
-                .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" skills ")),
-                outer[2],
-            );
-        } else {
-            let mut ls = app.skills_list_state.clone();
-            frame.render_stateful_widget(
-                List::new(items)
-                    .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" skills "))
-                    .highlight_style(hl())
-                    .highlight_symbol("> "),
-                main[0],
-                &mut ls,
-            );
-
-            let preview = app
-                .skills_list_state
-                .selected()
-                .and_then(|i| app.skills.get(i))
-                .map(|s| {
-                    let mut lines = vec![
-                        Line::from(Span::styled(
-                            s.name.clone(),
-                            Style::default()
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD),
-                        )),
-                        Line::from(""),
-                        Line::from(vec![
-                            Span::styled("source  ", Style::default().fg(theme().fg_dim)),
-                            Span::raw(s.source.clone()),
-                        ]),
-                    ];
-                    if !s.description.is_empty() {
-                        lines.push(Line::from(""));
-                        lines.push(Line::from(Span::raw(s.description.clone())));
-                    }
-                    lines
-                })
-                .unwrap_or_default();
-
-            frame.render_widget(
-                Paragraph::new(preview)
-                    .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" detail "))
-                    .wrap(Wrap { trim: false }),
-                main[1],
-            );
-        }
-
-        frame.render_widget(
-            Paragraph::new(footer(&[
-                ("↑↓/jk", "navigate"),
-                ("b", "browse skills.sh"),
-                ("esc", "back"),
-                ("tab", "switch"),
-                ("q", "quit"),
-            ])),
-            outer[3],
-        );
-    }
 }
 
 fn draw_pane(frame: &mut Frame, app: &App) {
@@ -6468,7 +5234,7 @@ fn format_session_date(iso: &str) -> String {
 
 fn handle_sessions(app: &mut App, key: KeyCode) -> bool {
     match &app.sessions_state.clone() {
-        SessionsState::NewPicker { agent_idx, prompt_idx } => {
+        SessionsState::NewPicker { agent_idx, prompt_idx: _ } => {
             let agents = [AgentKind::Claude, AgentKind::Codex, AgentKind::Gemini, AgentKind::Pi];
             let agent_count = agents.len();
             match key {
@@ -6478,50 +5244,26 @@ fn handle_sessions(app: &mut App, key: KeyCode) -> bool {
                 }
                 KeyCode::Left | KeyCode::Char('h') => {
                     let new_idx = if *agent_idx == 0 { agent_count - 1 } else { agent_idx - 1 };
-                    app.sessions_state = SessionsState::NewPicker { agent_idx: new_idx, prompt_idx: *prompt_idx };
+                    app.sessions_state = SessionsState::NewPicker { agent_idx: new_idx, prompt_idx: None };
                 }
                 KeyCode::Right | KeyCode::Char('l') => {
                     let new_idx = (agent_idx + 1) % agent_count;
-                    app.sessions_state = SessionsState::NewPicker { agent_idx: new_idx, prompt_idx: *prompt_idx };
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    // Cycle through prompts (None + project prompts)
-                    let prompt_count = app.project_prompts.len();
-                    let new_pidx = match prompt_idx {
-                        None => {
-                            if prompt_count > 0 { Some(prompt_count - 1) } else { None }
-                        }
-                        Some(i) => if *i == 0 { None } else { Some(i - 1) },
-                    };
-                    app.sessions_state = SessionsState::NewPicker { agent_idx: *agent_idx, prompt_idx: new_pidx };
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let prompt_count = app.project_prompts.len();
-                    let new_pidx = match prompt_idx {
-                        None => if prompt_count > 0 { Some(0) } else { None },
-                        Some(i) => {
-                            if i + 1 < prompt_count { Some(i + 1) } else { None }
-                        }
-                    };
-                    app.sessions_state = SessionsState::NewPicker { agent_idx: *agent_idx, prompt_idx: new_pidx };
+                    app.sessions_state = SessionsState::NewPicker { agent_idx: new_idx, prompt_idx: None };
                 }
                 KeyCode::Enter | KeyCode::Char('y') => {
                     let agent = agents[*agent_idx].clone();
-                    let prompt_name = prompt_idx.and_then(|i| app.project_prompts.get(i)).map(|p| p.name.clone());
                     let Some(proj_idx) = app.active_project_idx else { return false; };
                     let Some(project) = app.projects.get(proj_idx) else { return false; };
                     let path = project.path.clone();
-                    let cmd = agent.launch_cmd(&path, prompt_name.as_deref());
-                    // Write to clipboard
+                    let cmd = agent.launch_cmd(&path, None);
                     if let Ok(mut cb) = Clipboard::new() {
                         let _ = cb.set_text(&cmd);
                     }
-                    // Record pending session
                     let session = AgentSession {
                         id: None,
                         agent,
                         started_at: now_iso(),
-                        prompt: prompt_name,
+                        prompt: None,
                         first_message: None,
                     };
                     app.sessions.insert(0, session);
@@ -6724,9 +5466,8 @@ fn draw_sessions(frame: &mut Frame, app: &App) {
         Line::from(spans)
     };
 
-    if let SessionsState::NewPicker { agent_idx, prompt_idx } = &app.sessions_state {
-        let agents = ["claude", "codex", "gemini"];
-        // Build agent selector line
+    if let SessionsState::NewPicker { agent_idx, .. } = &app.sessions_state {
+        let agents = ["claude", "codex", "gemini", "pi"];
         let agent_spans: Vec<Span> = agents.iter().enumerate().flat_map(|(i, a)| {
             let active = i == *agent_idx;
             let span = if active {
@@ -6737,34 +5478,14 @@ fn draw_sessions(frame: &mut Frame, app: &App) {
             vec![span, Span::raw("  ")]
         }).collect();
 
-        // Build prompt selector
-        let prompt_names: Vec<String> = std::iter::once("(none)".to_string())
-            .chain(app.project_prompts.iter().map(|p| p.name.clone()))
-            .collect();
-        let selected_prompt_idx = prompt_idx.map(|i| i + 1).unwrap_or(0);
-        let prompt_spans: Vec<Span> = prompt_names.iter().enumerate().flat_map(|(i, name)| {
-            let active = i == selected_prompt_idx;
-            let span = if active {
-                Span::styled(name.clone(), Style::default().fg(theme().sel_fg).bg(theme().accent).add_modifier(Modifier::BOLD))
-            } else {
-                Span::styled(name.clone(), Style::default().fg(theme().fg_dim))
-            };
-            vec![span, Span::raw("  ")]
-        }).collect();
-
-        // Preview the generated command
         let Some(proj_idx) = app.active_project_idx else { return; };
         let Some(project) = app.projects.get(proj_idx) else { return; };
         let agent_kind = [AgentKind::Claude, AgentKind::Codex, AgentKind::Gemini, AgentKind::Pi][*agent_idx].clone();
-        let prompt_name = prompt_idx.and_then(|i| app.project_prompts.get(i)).map(|p| p.name.as_str());
-        let cmd_preview = agent_kind.launch_cmd(&project.path, prompt_name);
+        let cmd_preview = agent_kind.launch_cmd(&project.path, None);
 
         let content = vec![
             Line::from(""),
             Line::from(vec![Span::styled("  agent   ", Style::default().fg(theme().fg_dim))].into_iter().chain(agent_spans).collect::<Vec<_>>()),
-            Line::from(""),
-            Line::from(vec![Span::styled("  prompt  ", Style::default().fg(theme().fg_dim))].into_iter().chain(prompt_spans).collect::<Vec<_>>()),
-            Line::from(""),
             Line::from(""),
             Line::from(vec![
                 Span::styled("  $ ", Style::default().fg(theme().fg_dim)),
@@ -6885,105 +5606,6 @@ fn draw_sessions(frame: &mut Frame, app: &App) {
 }
 
 fn handle_skills(app: &mut App, key: KeyCode) -> bool {
-    if app.skills_browse {
-        // ── Browse mode key handling ──────────────────────────────────────
-        if app.skills_browse_query_active {
-            match key {
-                KeyCode::Esc => {
-                    app.skills_browse_query_active = false;
-                }
-                KeyCode::Enter => {
-                    app.skills_browse_query_active = false;
-                }
-                KeyCode::Backspace => {
-                    app.skills_browse_query.pop();
-                    app.skills_browse_indices =
-                        filter_registry(&app.skills_registry, &app.skills_browse_query);
-                    let mut ls = ListState::default();
-                    if !app.skills_browse_indices.is_empty() {
-                        ls.select(Some(0));
-                    }
-                    app.skills_browse_list_state = ls;
-                }
-                KeyCode::Char(c) => {
-                    app.skills_browse_query.push(c);
-                    app.skills_browse_indices =
-                        filter_registry(&app.skills_registry, &app.skills_browse_query);
-                    let mut ls = ListState::default();
-                    if !app.skills_browse_indices.is_empty() {
-                        ls.select(Some(0));
-                    }
-                    app.skills_browse_list_state = ls;
-                }
-                _ => {}
-            }
-            return false;
-        }
-
-        match key {
-            KeyCode::Esc => {
-                if app.skills_install_message.is_some() {
-                    app.skills_install_message = None;
-                } else {
-                    app.skills_browse = false;
-                    app.skills_browse_query.clear();
-                }
-            }
-            KeyCode::Char('b') => {
-                app.skills_browse = false;
-                app.skills_browse_query.clear();
-                app.skills_install_message = None;
-            }
-            KeyCode::Char('/') => {
-                app.skills_browse_query_active = true;
-                app.skills_install_message = None;
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let len = app.skills_browse_indices.len();
-                if len > 0 {
-                    let n = (app.skills_browse_list_state.selected().unwrap_or(0) + 1) % len;
-                    app.skills_browse_list_state.select(Some(n));
-                }
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                let len = app.skills_browse_indices.len();
-                if len > 0 {
-                    let cur = app.skills_browse_list_state.selected().unwrap_or(0);
-                    let n = if cur == 0 { len - 1 } else { cur - 1 };
-                    app.skills_browse_list_state.select(Some(n));
-                }
-            }
-            KeyCode::Enter => {
-                app.skills_install_message = Some("Read-only: pemguin observes skills but does not install them.".to_string());
-            }
-            _ => {}
-        }
-        return false;
-    }
-
-    // ── Installed view key handling ───────────────────────────────────────
-    if key == KeyCode::Char('b') {
-        app.skills_browse = true;
-        app.skills_install_message = None;
-        if !app.skills_registry_loaded && !app.skills_registry_loading {
-            app.skills_registry_loading = true;
-            let tx = app.async_tx.clone();
-            std::thread::spawn(move || {
-                let skills = fetch_skills_registry();
-                let _ = tx.send(AsyncResult::Registry(skills));
-            });
-        } else if app.skills_registry_loaded {
-            app.skills_browse_indices =
-                filter_registry(&app.skills_registry, &app.skills_browse_query);
-            let mut ls = ListState::default();
-            if !app.skills_browse_indices.is_empty() {
-                ls.select(Some(0));
-            }
-            app.skills_browse_list_state = ls;
-        }
-        return false;
-    }
-
     let len = app.skills.len();
     if len == 0 {
         return false;
@@ -7007,9 +5629,6 @@ fn handle_skills(app: &mut App, key: KeyCode) -> bool {
 }
 
 fn handle_agents(app: &mut App, key: KeyCode) -> bool {
-    if app.skills_browse {
-        return handle_skills(app, key);
-    }
     if !matches!(&app.sessions_state, SessionsState::List) {
         return handle_sessions(app, key);
     }
@@ -7095,13 +5714,11 @@ fn handle_text_editor(app: &mut App, key: KeyCode, modifiers: KeyModifiers) -> b
             } else {
                 app.text_editor = None;
                 app.reload_memories();
-                app.reload_project_prompts();
             }
         }
         KeyCode::Char('s') if primary => {
             let _ = save_editor_state(editor);
             app.reload_memories();
-            app.reload_project_prompts();
             app.refresh_setup();
         }
         KeyCode::Char('c') if primary => {
@@ -7325,180 +5942,6 @@ fn draw_text_editor(frame: &mut Frame, editor: &TextEditorState) {
         .spans
     };
     frame.render_widget(Paragraph::new(Line::from(footer_text)), outer[2]);
-}
-
-fn draw_fill(
-    frame: &mut Frame,
-    app: &App,
-    prompt_idx: usize,
-    field_idx: usize,
-    values: &HashMap<String, String>,
-    input: &str,
-) {
-    let area = frame.area();
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(1),
-        ])
-        .split(area);
-
-    let prompt = &app.prompts[prompt_idx];
-    let auto = app.auto_values();
-    let fillable: Vec<&String> = prompt
-        .placeholders
-        .iter()
-        .filter(|p| !auto.contains_key(*p))
-        .collect();
-
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                " 🐧 pm ",
-                Style::default()
-                    .fg(theme().sel_fg)
-                    .bg(theme().accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(&prompt.name, Style::default().fg(Color::White)),
-        ])),
-        outer[0],
-    );
-
-    let mut lines: Vec<Line> = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            "  Fill in placeholders",
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
-    for placeholder in &prompt.placeholders {
-        if let Some(v) = auto.get(placeholder) {
-            lines.push(Line::from(vec![
-                Span::raw(format!("  {placeholder:<14}")),
-                Span::styled(v.clone(), Style::default().fg(theme().fg_dim)),
-                Span::styled("  (auto)", Style::default().fg(theme().fg_xdim)),
-            ]));
-            continue;
-        }
-        let fi = fillable.iter().position(|p| *p == placeholder).unwrap_or(0);
-        if fi < field_idx {
-            let val = values.get(placeholder).map(|s| s.as_str()).unwrap_or("");
-            lines.push(Line::from(vec![
-                Span::raw(format!("  {placeholder:<14}")),
-                Span::styled(val.to_string(), Style::default().fg(theme().green)),
-                Span::styled(format!("  {I_CHECK}"), Style::default().fg(theme().green)),
-            ]));
-        } else if fi == field_idx {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {placeholder:<14}"),
-                    Style::default().fg(theme().accent).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!("{input}█"), Style::default().fg(Color::White)),
-            ]));
-        } else {
-            lines.push(Line::from(vec![
-                Span::raw(format!("  {placeholder:<14}")),
-                Span::styled("...", Style::default().fg(theme().fg_xdim)),
-            ]));
-        }
-    }
-    frame.render_widget(
-        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded)),
-        outer[1],
-    );
-    frame.render_widget(
-        Paragraph::new(footer(&[("enter", "confirm"), ("esc", "back")])),
-        outer[2],
-    );
-}
-
-fn draw_done(frame: &mut Frame, text: &str) {
-    let area = frame.area();
-    let mut lines: Vec<Line> = vec![
-        Line::from(""),
-        Line::from(vec![
-            Span::styled(format!("  {I_CHECK}  "), Style::default().fg(theme().green)),
-            Span::styled(
-                "Copied to clipboard",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  ─────────────────────────────",
-            Style::default().fg(theme().fg_xdim),
-        )),
-        Line::from(""),
-    ];
-    for line in text.lines().take(20) {
-        lines.push(Line::from(Span::styled(
-            format!("  {line}"),
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  any key to continue",
-        Style::default().fg(Color::DarkGray),
-    )));
-    frame.render_widget(
-        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" pemguin ")),
-        area,
-    );
-}
-
-fn draw_delete_confirm(frame: &mut Frame, confirm: &DeleteConfirm) {
-    let area = frame.area();
-    let popup = centered_rect(62, 9, area);
-    frame.render_widget(
-        Block::default()
-            .borders(Borders::ALL).border_type(BorderType::Rounded)
-            .title(" confirm delete ")
-            .style(Style::default().bg(Color::Black)),
-        popup,
-    );
-    let inner = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .margin(1)
-        .split(popup);
-    frame.render_widget(
-        Paragraph::new(Span::styled(&confirm.title, Style::default().fg(theme().red))),
-        inner[0],
-    );
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            &confirm.detail,
-            Style::default().fg(Color::White),
-        )),
-        inner[1],
-    );
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            "This cannot be undone from pemguin.",
-            Style::default().fg(theme().fg_dim),
-        )),
-        inner[2],
-    );
-    frame.render_widget(
-        Paragraph::new(footer(&[("y/enter", "delete"), ("n/esc", "cancel")])),
-        inner[3],
-    );
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
