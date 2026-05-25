@@ -1,8 +1,8 @@
 # Agent Storage Interface Docs
 
-Reference documents for how supported agents store data locally. These docs guide Pemguin's read-only storage readers.
+Reference documents for how supported agents store data locally. These docs guide project-index's read-only storage readers.
 
-Pemguin observes native storage. It should not copy agent data into project-local Pemguin directories or ask agents to change their storage conventions.
+project-index observes native storage. It should not copy agent data into project-local directories or ask agents to change their storage conventions.
 
 ## Supported Agents
 
@@ -23,7 +23,7 @@ When an agent updates its storage format:
 
 1. Validate against real files on disk.
 2. Update the relevant `docs/agents/<agent>.md` doc.
-3. Update the corresponding reader in `cli/src/lib.rs`.
+3. Update the corresponding reader in the relevant module under `cli/src/` (agent.rs, project.rs, skills.rs).
 4. Keep behavior read-only.
 
 Reader functions:
