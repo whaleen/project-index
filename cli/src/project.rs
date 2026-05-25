@@ -93,17 +93,13 @@ impl SetupStatus {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SetupCategory {
-    Initialization,
     Recommended,
-    Repair,
 }
 
 impl SetupCategory {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
-            SetupCategory::Initialization => "initialization",
             SetupCategory::Recommended => "recommended",
-            SetupCategory::Repair => "repair",
         }
     }
 }

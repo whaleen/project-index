@@ -6,6 +6,7 @@ use crate::config::{dirs_home, sanitize_project_component};
 // ── Agent types ───────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub(crate) enum MemoryAgent {
     Claude,
     Codex,
@@ -93,15 +94,6 @@ impl AgentKind {
         }
     }
 
-    pub(crate) fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "claude" => Some(AgentKind::Claude),
-            "codex" => Some(AgentKind::Codex),
-            "gemini" => Some(AgentKind::Gemini),
-            "pi" => Some(AgentKind::Pi),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Clone)]
