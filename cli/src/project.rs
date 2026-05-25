@@ -378,53 +378,50 @@ fn load_dirty_files(path: &Path) -> Vec<String> {
 // ── Project scanning ──────────────────────────────────────────────────────────
 
 pub(crate) fn scan_projects(config: &Config) -> Vec<Project> {
-    let base = std::env::var("PROJECT_INDEX_PROJECTS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            config
-                .projects
-                .root
-                .as_ref()
-                .map(|r| PathBuf::from(expand_tilde(r)))
-                .unwrap_or_else(|| {
-                    dirs_home()
-                        .map(|h| h.join("Projects"))
-                        .unwrap_or_else(|| PathBuf::from("."))
-                })
-        });
-
-    let Ok(level1) = fs::read_dir(&base) else {
-        return vec![];
+    let bases: Vec<PathBuf> = if let Ok(env_dir) = std::env::var("PROJECT_INDEX_PROJECTS_DIR") {
+        vec![PathBuf::from(env_dir)]
+    } else {
+        config
+            .projects
+            .effective_roots()
+            .iter()
+            .map(|r| PathBuf::from(expand_tilde(r)))
+            .collect()
     };
-    let mut level1_dirs: Vec<_> = level1
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir())
-        .collect();
-    level1_dirs.sort_by_key(|e| e.file_name());
 
     let mut candidates: Vec<(PathBuf, String)> = Vec::new();
-    for entry in level1_dirs {
-        let path = entry.path();
-        let dir_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-        if dir_name.starts_with('.') {
-            continue;
-        }
-        if path.join(".git").is_dir() {
-            candidates.push((path, String::new()));
-        } else if let Ok(level2) = fs::read_dir(&path) {
-            let mut level2_dirs: Vec<_> = level2
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().is_dir())
-                .collect();
-            level2_dirs.sort_by_key(|e| e.file_name());
-            for sub in level2_dirs {
-                let sub_path = sub.path();
-                if sub_path.join(".git").is_dir() {
-                    candidates.push((sub_path, dir_name.clone()));
+
+    for base in &bases {
+        let Ok(level1) = fs::read_dir(base) else { continue };
+        let mut level1_dirs: Vec<_> = level1
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect();
+        level1_dirs.sort_by_key(|e| e.file_name());
+
+        for entry in level1_dirs {
+            let path = entry.path();
+            let dir_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            if dir_name.starts_with('.') {
+                continue;
+            }
+            if path.join(".git").is_dir() {
+                candidates.push((path, String::new()));
+            } else if let Ok(level2) = fs::read_dir(&path) {
+                let mut level2_dirs: Vec<_> = level2
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_dir())
+                    .collect();
+                level2_dirs.sort_by_key(|e| e.file_name());
+                for sub in level2_dirs {
+                    let sub_path = sub.path();
+                    if sub_path.join(".git").is_dir() {
+                        candidates.push((sub_path, dir_name.clone()));
+                    }
                 }
             }
         }

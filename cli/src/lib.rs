@@ -1734,12 +1734,21 @@ fn draw_projects(frame: &mut Frame, app: &App) {
                 Line::from(""),
                 Line::from(Span::styled(
                     "  No projects found.",
+                    Style::default().fg(theme().fg_dim),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Add watched directories to ~/.project-index.toml:",
                     Style::default().fg(Color::DarkGray),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "  Set $PROJECT_INDEX_PROJECTS_DIR or place projects under ~/Projects/",
+                    "    [projects]",
                     Style::default().fg(Color::DarkGray),
+                )),
+                Line::from(Span::styled(
+                    "    roots = [\"~/code\", \"~/work\", \"~/personal\"]",
+                    Style::default().fg(theme().accent),
                 )),
             ])
             .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" projects ")),

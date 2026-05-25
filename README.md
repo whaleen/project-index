@@ -70,7 +70,7 @@ Observed in-place. Nothing is copied or synced.
 
 ```toml
 [projects]
-root = "~/Projects"   # scanned 2 levels deep for .git dirs
+roots = ["~/code", "~/work", "~/personal"]  # watch as many dirs as you want
 
 [theme]
 accent  = "#e8b887"   # hot-reloaded on file change
@@ -83,7 +83,7 @@ yellow  = "#e6b99d"
 purple  = "#aca1cf"
 ```
 
-Set `PROJECT_INDEX_PROJECTS_DIR` to override `projects.root` via env.
+Each root is scanned 2 levels deep for `.git` directories. Set `PROJECT_INDEX_PROJECTS_DIR` to override via env (single path).
 
 `~/.project-index/` holds observation cache (GitHub metadata, avatars).
 

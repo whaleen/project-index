@@ -125,7 +125,21 @@ pub(crate) struct Config {
 
 #[derive(Clone, serde::Deserialize, Default)]
 pub(crate) struct ProjectsConfig {
-    pub(crate) root: Option<String>,
+    #[serde(default)]
+    pub(crate) roots: Vec<String>,
+    pub(crate) root: Option<String>, // legacy single-root compat
+}
+
+impl ProjectsConfig {
+    pub(crate) fn effective_roots(&self) -> Vec<String> {
+        if !self.roots.is_empty() {
+            return self.roots.clone();
+        }
+        if let Some(r) = &self.root {
+            return vec![r.clone()];
+        }
+        vec![]
+    }
 }
 
 pub(crate) fn load_config() -> Config {
