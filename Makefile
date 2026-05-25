@@ -4,4 +4,4 @@ install:
 	cargo install --path cli
 
 dev:
-	cargo run --manifest-path cli/Cargo.toml --bin pm
+	cargo run --manifest-path cli/Cargo.toml --bin px

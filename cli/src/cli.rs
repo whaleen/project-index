@@ -138,11 +138,11 @@ pub(crate) fn inspect_project(path: &Path) -> CliProjectInspect {
 fn agent_instructions(path: &Path) -> CliAgentInstructions {
     CliAgentInstructions {
         project_path: path.to_string_lossy().to_string(),
-        summary: "Use pemguin as a read-only project and agent-state index.".to_string(),
-        inspect_command: format!("pm project inspect --json {}", path.display()),
+        summary: "Use project-index as a read-only project and agent-state index.".to_string(),
+        inspect_command: format!("px project inspect --json {}", path.display()),
         notes: vec![
             "Read `SPEC.md`, `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md` when they exist.".to_string(),
-            "Do not ask pemguin to create, repair, or mutate project files.".to_string(),
+            "Do not ask project-index to create, repair, or mutate project files.".to_string(),
         ],
     }
 }
@@ -155,13 +155,13 @@ fn print_json<T: serde::Serialize>(value: &T) -> io::Result<()> {
 }
 
 fn cli_usage() {
-    println!("pemguin CLI");
+    println!("project-index CLI");
     println!();
-    println!("  pm project inspect [--json] [PATH]");
-    println!("  pm context inspect [--json] [PATH]");
-    println!("  pm agent instructions [--json] [PATH]");
-    println!("  pm mcp serve");
-    println!("  pm mcp-server");
+    println!("  px project inspect [--json] [PATH]");
+    println!("  px context inspect [--json] [PATH]");
+    println!("  px agent instructions [--json] [PATH]");
+    println!("  px mcp serve");
+    println!("  px mcp-server");
     println!();
     println!("If no subcommand is given, the Ratatui TUI starts.");
 }
@@ -219,7 +219,7 @@ pub fn run_cli(args: &[String]) -> io::Result<bool> {
 fn mcp_tool_defs() -> Vec<McpToolDef> {
     vec![
         McpToolDef {
-            name: "pemguin_project_inspect",
+            name: "px_project_inspect",
             title: "Inspect Project Context",
             description: "Read-only inspection of observed project context files and agent-related surfaces.",
             input_schema: serde_json::json!({
@@ -234,7 +234,7 @@ fn mcp_tool_defs() -> Vec<McpToolDef> {
             }),
         },
         McpToolDef {
-            name: "pemguin_setup_plan",
+            name: "px_setup_plan",
             title: "Inspect Project Context (Legacy Setup Name)",
             description: "Legacy alias for read-only project context inspection. Does not create or repair files.",
             input_schema: serde_json::json!({
@@ -249,9 +249,9 @@ fn mcp_tool_defs() -> Vec<McpToolDef> {
             }),
         },
         McpToolDef {
-            name: "pemguin_agent_instructions",
-            title: "Pemguin Agent Instructions",
-            description: "Return read-only pemguin instructions an agent should follow when inspecting project context.",
+            name: "px_agent_instructions",
+            title: "project-index Agent Instructions",
+            description: "Return read-only project-index instructions an agent should follow when inspecting project context.",
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -285,15 +285,15 @@ fn mcp_default_path(arguments: Option<&serde_json::Value>) -> Result<PathBuf, St
 
 fn mcp_tool_result(name: &str, arguments: Option<&serde_json::Value>) -> Result<serde_json::Value, String> {
     match name {
-        "pemguin_project_inspect" => {
+        "px_project_inspect" => {
             let path = mcp_default_path(arguments)?;
             serde_json::to_value(inspect_project(&path)).map_err(|e| e.to_string())
         }
-        "pemguin_setup_plan" => {
+        "px_setup_plan" => {
             let path = mcp_default_path(arguments)?;
             serde_json::to_value(inspect_project(&path)).map_err(|e| e.to_string())
         }
-        "pemguin_agent_instructions" => {
+        "px_agent_instructions" => {
             let path = mcp_default_path(arguments)?;
             serde_json::to_value(agent_instructions(&path)).map_err(|e| e.to_string())
         }
@@ -391,11 +391,11 @@ fn run_mcp_server() -> io::Result<()> {
                             }
                         },
                         "serverInfo": {
-                            "name": "pemguin",
-                            "title": "Pemguin",
+                            "name": "project-index",
+                            "title": "project-index",
                             "version": env!("CARGO_PKG_VERSION")
                         },
-                        "instructions": "Use pemguin tools as a read-only index of project and agent state. Inspect observed context; do not ask pemguin to create, repair, or mutate files."
+                        "instructions": "Use project-index tools as a read-only index of project and agent state. Inspect observed context; do not ask project-index to create, repair, or mutate files."
                     }),
                 ))
             }

@@ -1,11 +1,18 @@
 [package]
-name = "pemguin"
-version = "0.1.1"
+name = "project-index"
+version = "0.2.0"
 edition = "2024"
+description = "A read-only terminal work index for humans and agents — projects, git state, sessions, memories, skills, and MCP config in one surface."
+license = "MIT"
+repository = "https://github.com/whaleen/project-index"
+homepage = "https://github.com/whaleen/project-index"
+keywords = ["tui", "terminal", "developer-tools", "agents", "git"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "../README.md"
 
 [[bin]]
-name = "pm"
-path = "src/bin/pm.rs"
+name = "px"
+path = "src/bin/px.rs"
 
 [dependencies]
 ratatui = "0.29"

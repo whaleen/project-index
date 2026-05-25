@@ -84,8 +84,8 @@ pub(crate) fn set_theme(cfg: &ThemeConfig) {
     THEME.with(|c| c.set(Some(t)));
 }
 
-pub(crate) fn reload_pemguin_theme_if_changed(mtime: &mut Option<SystemTime>) {
-    let Some(path) = dirs_home().map(|h| h.join(".pemguin.toml")) else { return };
+pub(crate) fn reload_theme_if_changed(mtime: &mut Option<SystemTime>) {
+    let Some(path) = dirs_home().map(|h| h.join(".project-index.toml")) else { return };
     let Ok(meta) = fs::metadata(&path) else { return };
     let Ok(modified) = meta.modified() else { return };
     if mtime.map_or(true, |last| modified > last) {
@@ -130,7 +130,7 @@ pub(crate) struct ProjectsConfig {
 
 pub(crate) fn load_config() -> Config {
     let home = dirs_home().unwrap_or_default();
-    let path = home.join(".pemguin.toml");
+    let path = home.join(".project-index.toml");
     fs::read_to_string(&path)
         .ok()
         .and_then(|s| toml::from_str(&s).ok())

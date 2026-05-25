@@ -1,22 +1,22 @@
-# pemguin — Architecture Overview
+# project-index — Architecture Overview
 
 ## Design Philosophy
 
-Pemguin is a read-only work index. It observes local repos and native agent/system storage so humans and agents can share situational awareness.
+project-index is a read-only work index. It observes local repos and native agent/system storage so humans and agents can share situational awareness.
 
 It must not scaffold, repair, mutate, or synchronize project files. See `docs/adr/0001-read-only-work-index.md`.
 
 ## Structure
 
-Most code currently lives in `cli/src/lib.rs`. This is a known maintenance problem and should be split by concern after behavior cleanup.
+Code is split across `cli/src/` modules: config, project, github, agent, skills, cli, lib.
 
 Entry surfaces:
 
-- **TUI**: `pemguin::start()`
-- **CLI**: `pemguin::run_cli(&args)`
-- **MCP**: `pm mcp serve`
+- **TUI**: `project_index::start()`
+- **CLI**: `project_index::run_cli(&args)`
+- **MCP**: `px mcp serve`
 
-`src/main.rs` and `src/bin/pm.rs` route to CLI when subcommands are present, otherwise start the TUI.
+`src/main.rs` and `src/bin/px.rs` route to CLI when subcommands are present, otherwise start the TUI.
 
 ## Screen Model
 
@@ -37,7 +37,7 @@ Target tabs may change as cleanup removes prompt/setup behavior. The intended du
 
 ### GitHub
 
-Home and Issues shell out to `gh`. GitHub metadata and avatars may be cached under `~/.pemguin/` for display performance.
+Home and Issues shell out to `gh`. GitHub metadata and avatars may be cached under `~/.project-index/` for display performance.
 
 ### Context files
 
@@ -86,7 +86,7 @@ Legacy mutation paths to remove:
 - MCP install/repair/edit/delete
 - prompt creation/editing/storage
 - memory creation/editing/deletion/sync
-- project-local `.pemguin/` session registries/exports
+- project-local `.project-index/` session registries/exports
 
 ## Module Split Target
 

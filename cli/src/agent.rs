@@ -642,7 +642,7 @@ pub(crate) fn session_is_exported(session: &AgentSession, project_path: &Path) -
         None => return false,
     };
     let short_id = &id[..id.len().min(8)];
-    let exports_dir = project_path.join(".pemguin").join("exports");
+    let exports_dir = project_path.join(".project-index").join("exports");
     fs::read_dir(&exports_dir)
         .into_iter()
         .flatten()

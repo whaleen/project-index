@@ -31,7 +31,7 @@ use ratatui::{
 
 use crate::config::{
     Config,
-    load_config, set_theme, theme, reload_pemguin_theme_if_changed,
+    load_config, set_theme, theme, reload_theme_if_changed,
     I_BRANCH, I_CHECK, I_CROSS, I_WARN, I_BULLET, I_COMMIT, I_ISSUES, I_SETUP,
     I_PROJECTS, I_MEMORY, I_MCP, I_PANE,
 };
@@ -939,7 +939,7 @@ fn handle_home(app: &mut App, key: KeyCode) -> bool {
             }
         }
         KeyCode::Char('e') | KeyCode::Char('u') => {
-            app.home_save_msg = Some("Read-only: pemguin observes GitHub metadata but does not edit it.".to_string());
+            app.home_save_msg = Some("Read-only: project-index observes GitHub metadata but does not edit it.".to_string());
         }
         KeyCode::Char('y') => {
             if let Some(data) = &app.home_data {
@@ -1104,7 +1104,7 @@ fn tab_span(icon: &str, label: &str, n: u8, active: bool) -> Vec<Span<'static>> 
 
 fn header_row(app: &App) -> Line<'static> {
     let badge = Span::styled(
-        " 🐧 pm ",
+        " px",
         Style::default()
             .fg(theme().sel_fg)
             .bg(theme().accent)
@@ -1969,7 +1969,7 @@ fn handle_memories(app: &mut App, key: KeyCode) -> bool {
                 app.memory_input.push(c);
             }
             KeyCode::Enter => {
-                app.memory_message = Some("Read-only: pemguin observes memories but does not create them.".to_string());
+                app.memory_message = Some("Read-only: project-index observes memories but does not create them.".to_string());
                 app.memory_inputting = false;
                 app.memory_input.clear();
             }
@@ -2013,7 +2013,7 @@ fn handle_memories(app: &mut App, key: KeyCode) -> bool {
             }
         }
         KeyCode::Char('e') | KeyCode::Char('n') | KeyCode::Char('d') => {
-            app.memory_message = Some("Read-only: pemguin observes memories but does not edit, create, or delete them.".to_string());
+            app.memory_message = Some("Read-only: project-index observes memories but does not edit, create, or delete them.".to_string());
         }
         KeyCode::Char('r') => {
             app.reload_memories();
@@ -2091,7 +2091,7 @@ fn handle_setup(app: &mut App, key: KeyCode) -> bool {
             }
         }
         KeyCode::Char('e') | KeyCode::Char('d') | KeyCode::Char('R') | KeyCode::Char('a') | KeyCode::Char('g') => {
-            app.setup_message = Some("Read-only: pemguin observes context files but does not edit, create, delete, reset, or repair them.".to_string());
+            app.setup_message = Some("Read-only: project-index observes context files but does not edit, create, delete, reset, or repair them.".to_string());
         }
         KeyCode::Char('r') => {
             app.refresh_setup();
@@ -2163,7 +2163,7 @@ fn draw_setup(frame: &mut Frame, app: &App) {
                         Style::default().fg(theme().yellow).add_modifier(Modifier::BOLD),
                     )),
                     Line::from(Span::styled(
-                        "  Read-only: create or repair files outside pemguin if desired.",
+                        "  Read-only: create or repair files outside project-index if desired.",
                         Style::default().fg(theme().fg_dim),
                     )),
                 ])
@@ -2533,7 +2533,7 @@ fn draw_agents(frame: &mut Frame, app: &App) {
     match app.agent_section {
         AgentSection::Mcp => {
             let items: Vec<ListItem> = if app.mcp_servers.is_empty() {
-                vec![ListItem::new("pemguin")]
+                vec![ListItem::new("project-index")]
             } else {
                 app.mcp_servers
                     .iter()
@@ -2549,7 +2549,7 @@ fn draw_agents(frame: &mut Frame, app: &App) {
                 main[0],
                 &mut ls,
             );
-            let pemguin_installed = app
+            let px_installed = app
                 .active_project_idx
                 .and_then(|i| app.projects.get(i))
                 .map(|p| p.mcp_ready)
@@ -2572,10 +2572,10 @@ fn draw_agents(frame: &mut Frame, app: &App) {
                     ]),
                     Line::from(""),
                     Line::from(vec![
-                        Span::styled("pemguin  ", Style::default().fg(theme().fg_dim)),
+                        Span::styled("project-index  ", Style::default().fg(theme().fg_dim)),
                         Span::styled(
-                            if pemguin_installed { "installed" } else { "not installed" },
-                            Style::default().fg(if pemguin_installed { theme().green } else { theme().yellow }),
+                            if px_installed { "installed" } else { "not installed" },
+                            Style::default().fg(if px_installed { theme().green } else { theme().yellow }),
                         ),
                     ]),
                 ]
@@ -2583,7 +2583,7 @@ fn draw_agents(frame: &mut Frame, app: &App) {
                 vec![
                     Line::from(Span::styled("No MCP servers configured.", Style::default().fg(theme().fg_xdim))),
                     Line::from(""),
-                    Line::from(Span::styled("Use `i` to install the pemguin MCP server.", Style::default().fg(theme().fg_dim))),
+                    Line::from(Span::styled("Use `i` to install the project-index MCP server.", Style::default().fg(theme().fg_dim))),
                 ]
             };
             frame.render_widget(
@@ -2974,7 +2974,7 @@ fn handle_sessions(app: &mut App, key: KeyCode) -> bool {
                     }
                 }
                 KeyCode::Char('e') => {
-                    app.sessions_message = Some("Read-only: pemguin observes sessions but does not export them into project directories.".to_string());
+                    app.sessions_message = Some("Read-only: project-index observes sessions but does not export them into project directories.".to_string());
                 }
                 _ => {}
             }
@@ -3299,7 +3299,7 @@ fn handle_mcp(app: &mut App, key: KeyCode) -> bool {
             app.mcp_list_state.select(Some(n));
         }
         KeyCode::Char('i') | KeyCode::Char('e') | KeyCode::Char('d') => {
-            app.mcp_message = Some("Read-only: pemguin observes MCP config but does not create, edit, repair, or delete it.".to_string());
+            app.mcp_message = Some("Read-only: project-index observes MCP config but does not create, edit, repair, or delete it.".to_string());
         }
         KeyCode::Char('r') => {
             app.refresh_mcp();
@@ -3465,7 +3465,7 @@ fn draw_text_editor(frame: &mut Frame, editor: &TextEditorState) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(
-                " 🐧 pm ",
+                " px",
                 Style::default()
                     .fg(theme().sel_fg)
                     .bg(theme().accent)
@@ -3595,7 +3595,7 @@ pub fn start() -> io::Result<()> {
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> io::Result<()> {
     loop {
-        reload_pemguin_theme_if_changed(&mut app.theme_mtime);
+        reload_theme_if_changed(&mut app.theme_mtime);
         app.process_async_results();
         terminal.draw(|f| draw(f, app))?;
 

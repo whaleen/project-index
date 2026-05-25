@@ -1,12 +1,12 @@
-# pemguin — Product Contract
+# project-index — Product Contract
 
-`SPEC.md` is the lifecycle contract for this project: what Pemguin must be, what it must not become, and what behavior should be preserved as the code changes.
+`SPEC.md` is the lifecycle contract for this project: what project-index must be, what it must not become, and what behavior should be preserved as the code changes.
 
 ## Product Thesis
 
-Pemguin is a read-only work index for humans and agents. It gives one terminal surface for observing local projects, git state, native agent context, native agent sessions, skills, MCP config, and related system state.
+project-index is a read-only work index for humans and agents. It gives one terminal surface for observing local projects, git state, native agent context, native agent sessions, skills, MCP config, and related system state.
 
-Pemguin is not a scaffold tool, setup wizard, prompt manager, memory manager, or agent configuration writer.
+project-index is not a scaffold tool, setup wizard, prompt manager, memory manager, or agent configuration writer.
 
 See `docs/adr/0001-read-only-work-index.md`.
 
@@ -16,8 +16,8 @@ See `docs/adr/0001-read-only-work-index.md`.
 - ✅ No project scaffolding or initialization
 - ✅ No creating, editing, deleting, resetting, repairing, or migrating project files
 - ✅ No prompt storage or prompt-template management
-- ✅ No Pemguin-owned project state as source of truth
-- ✅ Observe `SPEC.md`; do not enforce or maintain it from Pemguin
+- ✅ No project-index-owned project state as source of truth
+- ✅ Observe `SPEC.md`; do not enforce or maintain it from project-index
 - ✅ MCP/CLI surfaces are inspection-only
 
 ## Observed Project Index
@@ -104,14 +104,14 @@ These behaviors are intentionally out of scope and should be removed when encoun
 
 ## Architecture Contract
 
-- 📋 Split `cli/src/lib.rs` by concern: config, project scan, agent readers, git/GitHub readers, app state, tab renderers, key handlers, CLI/MCP.
+- ✅ Split `cli/src/lib.rs` by concern: config, project scan, agent readers, git/GitHub readers, app state, tab renderers, key handlers, CLI/MCP.
 - 📋 Keep native agent storage docs current under `docs/agents/`.
 - 📋 Add regression checks for read-only behavior: no UI/CLI/MCP path should write project files.
 
 ## Known Issues
 
-- `cli/src/lib.rs` is still monolithic.
-- Prompt manager and setup-era code still exist and need removal.
-- Some docs still mention legacy setup/prompt concepts.
+
+
+
 - Codex session scan can be slow on large histories.
 - Project selection resets after full rescan.

@@ -14,7 +14,7 @@ use crate::project::RepoMeta;
 pub(crate) fn meta_cache_path() -> PathBuf {
     dirs_home()
         .unwrap_or_default()
-        .join(".pemguin")
+        .join(".project-index")
         .join("cache.json")
 }
 
@@ -129,7 +129,7 @@ pub(crate) fn relative_date(iso: &str) -> String {
 pub(crate) fn avatar_dir() -> PathBuf {
     dirs_home()
         .unwrap_or_default()
-        .join(".pemguin")
+        .join(".project-index")
         .join("avatars")
 }
 

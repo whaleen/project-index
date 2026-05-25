@@ -1,28 +1,30 @@
-# pemguin 🐧
+# project-index
 
 Read-only work index for developers who work with AI agents.
 
-`pm` / `pemguin` is a Ratatui TUI that gives humans and agents one terminal surface for observing local projects, git state, native agent context files, sessions, memories, skills, MCP config, and related system state.
+`px` is a Ratatui TUI that gives humans and agents one terminal surface for observing local projects, git state, native agent context files, sessions, memories, skills, MCP config, and related system state.
 
-**Observer-first. Read-only.** Pemguin reads from where git and agents naturally store things. It does not scaffold projects, write prompts, sync memories, repair config, or maintain project-local Pemguin state.
+**Observer-first. Read-only.** project-index reads from where git and agents naturally store things. It does not scaffold projects, write prompts, sync memories, repair config, or maintain project-local state.
 
 ## Install
 
 ```bash
-git clone https://github.com/whaleen/pemguin
-cd pemguin/cli
+# via Homebrew
+brew tap whaleen/tap
+brew install project-index
+
+# or from source
+git clone https://github.com/whaleen/project-index
+cd project-index/cli
 cargo install --path .
 ```
-
-Installs both `pm` and `pemguin`.
 
 Requires: Rust stable, `gh` CLI for GitHub metadata/issues, Nerd Font terminal.
 
 ## Usage
 
 ```bash
-pm
-pemguin
+px
 ```
 
 Navigate with `↑↓` or `jk`. Press `enter` to open a project. `esc` goes back. `q` quits.
@@ -34,10 +36,9 @@ Navigate with `↑↓` or `jk`. Press `enter` to open a project. `esc` goes back
 | `1` | Home | Repo identity, README, recent commits, git/GitHub summary |
 | `2` | Issues | Open GitHub issues via `gh` |
 | `3` | Config | Observed context/config files: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.mcp.json` |
-| `4` | Prompts | Legacy prompt browser; slated for removal |
-| `5` | Memories | Native agent memory/config surfaces |
-| `6` | Agents | MCP servers, skills, and per-project sessions |
-| `7` | Pane | Legacy launcher surface; slated for reconsideration under read-only rules |
+| `4` | Memories | Native agent memory/config surfaces |
+| `5` | Agents | MCP servers, skills, and per-project sessions |
+| `6` | Pane | Legacy launcher surface |
 
 ## Sessions
 
@@ -52,7 +53,7 @@ Sessions are discovered directly from each agent's native storage:
 
 ## Memories / native config
 
-Pemguin observes native agent locations. It should not copy or synchronize these into Pemguin-owned project directories.
+project-index observes native agent locations. It does not copy or synchronize these into project-index-owned directories.
 
 | Agent | Source |
 |-------|--------|
@@ -63,7 +64,7 @@ Pemguin observes native agent locations. It should not copy or synchronize these
 
 ## Configuration
 
-`~/.pemguin.toml`:
+`~/.project-index.toml`:
 
 ```toml
 [projects]
@@ -82,23 +83,23 @@ purple  = "#aca1cf"
 
 Set `PEMGUIN_PROJECTS_DIR` to override `projects.root` via env.
 
-`~/.pemguin/` may contain observation cache such as GitHub metadata and avatars. Project-local `.pemguin/` directories are legacy artifacts, not canonical Pemguin storage.
+`~/.project-index/` contains observation cache such as GitHub metadata and avatars.
 
 ## MCP server
 
-`pm` can run as a local stdio MCP server:
+`px` can run as a local stdio MCP server:
 
 ```bash
-pm mcp serve
+px mcp serve
 ```
 
-MCP tools are intended to be read-only inspection surfaces for agents.
+MCP tools are read-only inspection surfaces for agents.
 
 Current tools:
 
-- `pemguin_project_inspect`
-- `pemguin_setup_plan` — legacy naming; should become inspection-only or be removed
-- `pemguin_agent_instructions`
+- `px_project_inspect`
+- `px_setup_plan`
+- `px_agent_instructions`
 
 ## Supported agents
 
@@ -114,7 +115,7 @@ See `docs/agents/` for storage interface docs.
 ## Project structure
 
 ```text
-pemguin/
+project-index/
   cli/            Rust TUI + CLI source
   docs/adr/       product/architecture decisions
   docs/agents/    native storage interface docs
