@@ -1738,7 +1738,7 @@ fn draw_projects(frame: &mut Frame, app: &App) {
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "  Set $PEMGUIN_PROJECTS_DIR or place projects under ~/Projects/",
+                    "  Set $PROJECT_INDEX_PROJECTS_DIR or place projects under ~/Projects/",
                     Style::default().fg(Color::DarkGray),
                 )),
             ])

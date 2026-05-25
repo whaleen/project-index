@@ -378,7 +378,7 @@ fn load_dirty_files(path: &Path) -> Vec<String> {
 // ── Project scanning ──────────────────────────────────────────────────────────
 
 pub(crate) fn scan_projects(config: &Config) -> Vec<Project> {
-    let base = std::env::var("PEMGUIN_PROJECTS_DIR")
+    let base = std::env::var("PROJECT_INDEX_PROJECTS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             config
