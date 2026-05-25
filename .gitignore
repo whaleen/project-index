@@ -1,10 +1,11 @@
 cli/target/
 
-# Pemguin TUI
-.agents/
-.claude/
-.vite-hooks/
-skills-lock.json
-CLAUDE.md
-GEMINI.md
-.memory/
+# Local agent/runtime leftovers
+/.agents/
+/.claude/
+/.vite-hooks/
+/skills-lock.json
+/.pemguin/
+/.memory/
+/.prompts/
+/.pemguin.toml

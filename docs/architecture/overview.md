@@ -2,137 +2,104 @@
 
 ## Design Philosophy
 
-Observer-first, modifier-second, zero-config. pemguin reads from where agents naturally store things. It does not reproduce agent data in project directories or steer agents toward any structure. The only config it writes is `~/.pemguin.toml` (projects root + theme).
+Pemguin is a read-only work index. It observes local repos and native agent/system storage so humans and agents can share situational awareness.
+
+It must not scaffold, repair, mutate, or synchronize project files. See `docs/adr/0001-read-only-work-index.md`.
 
 ## Structure
 
-Everything lives in `cli/src/lib.rs` (~9000 lines). Two entry surfaces:
+Most code currently lives in `cli/src/lib.rs`. This is a known maintenance problem and should be split by concern after behavior cleanup.
 
-- **TUI**: Ratatui application started by `pemguin::start()`
-- **CLI**: machine-oriented commands dispatched by `pemguin::run_cli()`
+Entry surfaces:
 
-`src/main.rs` and `src/bin/pm.rs` both route to CLI when subcommands are present, otherwise start the TUI. Backend: Ratatui + Crossterm.
+- **TUI**: `pemguin::start()`
+- **CLI**: `pemguin::run_cli(&args)`
+- **MCP**: `pm mcp serve`
+
+`src/main.rs` and `src/bin/pm.rs` route to CLI when subcommands are present, otherwise start the TUI.
 
 ## Screen Model
 
-```
+```text
 Screen::Projects          — root project list
-Screen::InProject(tab)    — drilled into a project, one of 7 tabs
+Screen::InProject(tab)    — selected project
 ```
 
-Tabs: `Home | Issues | Config | Prompts | Memories | Agents | Pane`
+Current tabs: `Home | Issues | Config | Prompts | Memories | Agents | Pane`.
 
-The Agents tab has three sub-sections navigated with `[`/`]`: `Mcp | Skills | Sessions`
+Target tabs may change as cleanup removes prompt/setup behavior. The intended durable surfaces are Overview/Git, Issues, Context, Sessions, Agents/System.
 
-## Application State (`App`)
+## Data Sources
 
-Key fields:
+### Projects / Git
 
-- `screen: Screen` — current screen + active tab
-- `projects: Vec<Project>` — scanned project list
-- `project_entries: Vec<ProjectEntry>` — flat render list (Group headers + Item indices)
-- `repo: String` — active project's `owner/repo` slug
-- Per-tab state: `issue_list_state`, `setup_items`, `memory_files`, `skills`, `mcp_servers`, `sessions`, pane state, etc.
+`scan_projects()` walks up to 2 levels from the configured root. `project_info()` reads branch, dirty count, ahead/behind, and context presence.
 
-## Layout
+### GitHub
 
-Every InProject screen uses a 2-row header:
+Home and Issues shell out to `gh`. GitHub metadata and avatars may be cached under `~/.pemguin/` for display performance.
 
-```
-┌──────────────────────────────────────────┐
-│  header row: 🐧 pm  repo-name  branch    │
-│  nav row:  1 home  2 issues  3 config …  │
-├──────────────────────────────────────────┤
-│  content area                            │
-├──────────────────────────────────────────┤
-│  footer: key hints                       │
-└──────────────────────────────────────────┘
-```
+### Context files
 
-Some tabs add variable-height rows for inputs and status messages.
+The Config/Context surface observes project files such as:
 
-## Key Handling
+- `SPEC.md`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `GEMINI.md`
+- `.mcp.json`
+- agent/project skill files when present
 
-`handle_key()` dispatches in layers:
+These are observations only. Pemguin should not create, delete, reset, repair, or edit them.
 
-1. `Ctrl+C` — always quit
-2. Global InProject handlers: `Esc` → back, `q` → quit, `Tab`/number keys → switch tab
-3. Tab-specific handler: `handle_home`, `handle_issues`, `handle_setup`, `handle_memories`, etc.
+### Native agent storage
 
-Sub-flows (prompt fill, home edit, memory input) capture all keys and suppress global nav until dismissed.
+Reader docs live under `docs/agents/`.
 
-## Project Scanning
+Sessions:
 
-`scan_projects()` walks at most 2 levels from the configured root:
+- Claude: `~/.claude/projects/<encoded>/`
+- Codex: `~/.codex/sessions/YYYY/MM/DD/`
+- Gemini: `~/.gemini/projects.json` + `~/.gemini/tmp/<project>/chats/`
+- Pi: `~/.pi/agent/sessions/<encoded>/`
 
-```
-~/Projects/
-  repo-a/         ← level 1, .git present → included, group=""
-  _org/           ← level 1, no .git
-    repo-b/       ← level 2, .git present → included, group="_org"
-    repo-c/cli/   ← level 3, NOT found
-```
+Memory/config:
 
-`project_info()` runs git inspection and setup checks per directory. Scanning is parallelized across worker threads. Initial scan runs in the background after TUI opens.
+- Claude: `~/.claude/projects/<encoded>/memory/`
+- Codex: `~/.codex/memories/<repo-name or sanitized-path>/`
+- Gemini: `~/.gemini/GEMINI.md`
+- Pi: `~/.pi/agent/` config/session state
 
-## Agent Storage Readers
+Skills/MCP:
 
-Native agent storage is read directly — no intermediate files. See `docs/agents/` for the full storage interface spec for each agent.
+- project `.mcp.json`
+- project `.agents/skills` and `skills-lock.json`
+- global `~/.agents`, `~/.claude`, `~/.codex`, `~/.gemini`, `~/.pi/agent` sources as the implementation expands
 
-### Sessions (`resolve_sessions`)
+## Read-only Contract
 
-Called when the Sessions sub-section is first opened. Reads from:
+No UI, CLI, or MCP path should write project files. If a feature needs mutation, it belongs outside Pemguin or must be explicitly re-approved with a new ADR.
 
-- **Claude**: `claude_project_dirs()` returns matching `~/.claude/projects/<encoded>/` dirs (checks both v1 and v2 path encoding). Scans JSONL files.
-- **Codex**: `import_codex_sessions()` walks `~/.codex/sessions/YYYY/MM/DD/` and matches `cwd` field in the `session_meta` first line.
-- **Gemini**: `import_gemini_sessions()` reads `~/.gemini/projects.json` for the project name, then scans `~/.gemini/tmp/<name>/chats/` JSON files.
-- **Pi**: `import_pi_sessions()` uses `pi_encode_path()` to find `~/.pi/agent/sessions/<encoded>/` and reads JSONL files.
+Legacy mutation paths to remove:
 
-### Memories (`reload_memories`)
+- setup apply/reset/delete
+- MCP install/repair/edit/delete
+- prompt creation/editing/storage
+- memory creation/editing/deletion/sync
+- project-local `.pemguin/` session registries/exports
 
-Three views switchable within the Memories tab:
+## Module Split Target
 
-- **Claude** (`c`): `~/.claude/projects/<encoded>/memory/*.md`
-- **Codex** (`x`): `~/.codex/memories/<repo-name>/*.md`
-- **Gemini** (`g`): `~/.gemini/GEMINI.md` (single file, global)
+When cleanup stabilizes behavior, split `cli/src/lib.rs` into modules like:
 
-### Path Encoding
-
-| Agent | Rule | Example |
-|-------|------|---------|
-| Claude | non-alphanumeric → `-` (two variants: `_` preserved or converted) | `-Users-josh-Projects--foo` |
-| Codex | date-bucketed; match by `cwd` field | n/a |
-| Gemini | project name from `~/.gemini/projects.json` | `astrds` |
-| Pi | strip leading `/`, replace `/` with `-`, wrap in `--` | `--Users-josh-Projects-_foo--` |
-
-## Data Flow
-
-```
-App::new()
-  → spawn background scan_projects()
-  → render root immediately (shows "Scanning…")
-
-On project open (switch_project):
-  → start_home_load() — spawns background thread for gh API calls
-  → lazy tab loading via ensure_tab_loaded()
-
-On tab open:
-  → Memories: reload_memories() reads native agent storage
-  → Agents/Sessions: resolve_sessions() scans all 4 agent stores
-  → Agents/Skills: load_skills() reads ~/.agents/.skill-lock.json
-  → Agents/MCP: load_mcp_servers() reads .mcp.json + ~/.claude.json
-```
-
-## Agent Storage Maintenance
-
-When an agent updates its storage format:
-
-1. Validate against disk using the checklist in `docs/agents/<agent>.md`
-2. Update `docs/agents/<agent>.md`
-3. Update the relevant reader function in `cli/src/lib.rs`
-
-Reader functions by agent:
-- Claude: `claude_project_dirs()`, `resolve_sessions()`, `claude_memory_path()`
-- Codex: `import_codex_sessions()`, `parse_codex_session()`, `codex_memory_dirs()`
-- Gemini: `import_gemini_sessions()`, `gemini_memory_path()`
-- Pi: `import_pi_sessions()`, `pi_encode_path()`
+- `config`
+- `theme`
+- `git`
+- `github`
+- `project_scan`
+- `agent_readers`
+- `context_surface`
+- `app_state`
+- `render`
+- `handlers`
+- `cli_mcp`

@@ -1,50 +1,52 @@
 # Agent Storage Interface Docs
 
-Reference documents for how each supported agent stores its data locally. These are the source of truth for the TUI's session/memory/skills reader layer.
+Reference documents for how supported agents store data locally. These docs guide Pemguin's read-only storage readers.
+
+Pemguin observes native storage. It should not copy agent data into project-local Pemguin directories or ask agents to change their storage conventions.
 
 ## Supported Agents
 
-| Agent | Binary | Sessions | Memory | Skills | Doc |
-|-------|--------|----------|--------|--------|-----|
-| Claude Code | `claude` | `~/.claude/projects/<encoded>/` JSONL | `~/.claude/projects/<encoded>/memory/` (auto-written) | `~/.claude/skills/` + plugins | [claude.md](claude.md) |
-| Codex | `codex` | `~/.codex/sessions/YYYY/MM/DD/` JSONL | `~/.codex/memories/<repo-name>/` (auto-written) | `~/.codex/skills/` (own hierarchy) | [codex.md](codex.md) |
-| Gemini CLI | `gemini` | `~/.gemini/tmp/<name>/chats/` JSON | `~/.gemini/GEMINI.md` (auto-written by `save_memory`) | `~/.gemini/skills/` + `~/.agents/skills/` | [gemini.md](gemini.md) |
-| Pi | `pi` | `~/.pi/agent/sessions/<encoded>/` JSONL | none (in-session only) | `~/.pi/agent/skills/` + `~/.agents/skills/` + npm packages | [pi.md](pi.md) |
+| Agent | Binary | Sessions | Memory / config | Skills |
+|-------|--------|----------|-----------------|--------|
+| Claude Code | `claude` | `~/.claude/projects/<encoded>/` JSONL | `~/.claude/projects/<encoded>/memory/` | `~/.claude/skills/` + plugins |
+| Codex | `codex` | `~/.codex/sessions/YYYY/MM/DD/` JSONL | `~/.codex/memories/<repo-name or sanitized-path>/` | `~/.codex/skills/` |
+| Gemini CLI | `gemini` | `~/.gemini/tmp/<project-name>/chats/` JSON, from `~/.gemini/projects.json` | `~/.gemini/GEMINI.md` | `~/.gemini/skills/` + `~/.agents/skills/` |
+| Pi | `pi` | `~/.pi/agent/sessions/<encoded>/` JSONL | `~/.pi/agent/` config/session state | `~/.pi/agent/skills/` + `~/.agents/skills/` |
 
 ## Shared Ecosystem
 
-Skills are cross-agent. See [shared.md](shared.md) for the `~/.agents/skills/` directory format, `SKILL.md` spec, `npx skills` toolchain, and per-agent behavior table.
+Skills are cross-agent. See `shared.md` for the `~/.agents/skills/` directory format, `SKILL.md` spec, `npx skills` toolchain, and per-agent behavior table.
 
 ## Maintenance Flow
 
 When an agent updates its storage format:
 
-1. **Validate** — run the validation checklist in the agent's doc against a real session on disk
-2. **Update interface doc** — update the relevant `docs/agents/<agent>.md` with the new structure
-3. **Update TUI** — adjust the reader function in `cli/src/lib.rs` that parses that agent's sessions/memory
+1. Validate against real files on disk.
+2. Update the relevant `docs/agents/<agent>.md` doc.
+3. Update the corresponding reader in `cli/src/lib.rs`.
+4. Keep behavior read-only.
 
-Reader functions to update by agent:
-- Claude: `claude_project_dirs()`, `resolve_sessions()`, `claude_memory_path()`
-- Codex: `import_codex_sessions()`, `parse_codex_session()`, `codex_memory_dirs()`
-- Gemini: `gemini_memory_dirs()` + new `import_gemini_sessions()` (not yet implemented)
-- Pi: new `pi_project_dirs()`, `import_pi_sessions()` (not yet implemented)
+Reader functions:
+
+- Claude: `claude_project_dirs`, `resolve_sessions`, `claude_memory_path`
+- Codex: `import_codex_sessions`, `parse_codex_session`, `codex_memory_dirs`
+- Gemini: `import_gemini_sessions`, `gemini_memory_path`
+- Pi: `pi_encode_path`, `import_pi_sessions`
 
 ## Path Encoding Summary
 
-Each agent has its own convention for turning an absolute path into a directory name:
-
 | Agent | Rule | Example (`/Users/josh/Projects/_foo`) |
 |-------|------|---------------------------------------|
-| Claude | each non-alphanumeric → `-` | `-Users-josh-Projects--foo` (v2) |
-| Codex | date-bucketed; `cwd` field in session meta | n/a (scan + filter) |
-| Gemini | `sha256(path)` hex | `02aa8978ef34...` |
-| Pi | wrap in `--`, each `/` → `-` | `--Users-josh-Projects-_foo--` |
+| Claude | checks two historical encodings: `/` → `-`, and `/` + `_` → `-` | `-Users-josh-Projects-_foo` or `-Users-josh-Projects--foo` |
+| Codex | date-bucketed; match by `cwd` field in session meta | n/a |
+| Gemini | project name from `~/.gemini/projects.json`; legacy SHA-256 dirs still need support | `astrds` |
+| Pi | strip leading `/`, replace `/` with `-`, wrap in `--` | `--Users-josh-Projects-_foo--` |
 
 ## Session Format Summary
 
-| Agent | File format | First-line marker | Project match method |
-|-------|-------------|-------------------|----------------------|
-| Claude | JSONL | `type: "last-prompt"` | encoded path in dir name |
-| Codex | JSONL | `type: "session_meta"` with `cwd` | scan + `cwd` compare |
-| Gemini | JSON (single object) | top-level `sessionId` + `projectHash` | sha256 dir lookup |
-| Pi | JSONL | `type: "session"` with `cwd` | encoded path in dir name |
+| Agent | File format | Project match method |
+|-------|-------------|----------------------|
+| Claude | JSONL | encoded path directory |
+| Codex | JSONL | first-line `session_meta.payload.cwd` |
+| Gemini | JSON | project mapping + chat JSON |
+| Pi | JSONL | encoded path directory + first-line `cwd` |
