@@ -1,9 +1,7 @@
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
-use crate::project::{
-    SetupItem, SetupStatus, scan_setup_all, setup_item_edit_path,
-};
+use crate::project::{SetupItem, SetupStatus, scan_setup_all, setup_item_edit_path};
 
 // ── CLI/MCP data types ────────────────────────────────────────────────────────
 
@@ -59,14 +57,46 @@ struct McpToolDef {
 
 fn managed_project_paths() -> Vec<CliManagedPath> {
     vec![
-        CliManagedPath { path: "SPEC.md".to_string(), kind: "file", required: false },
-        CliManagedPath { path: "AGENTS.md".to_string(), kind: "file", required: false },
-        CliManagedPath { path: "CLAUDE.md".to_string(), kind: "file/symlink", required: false },
-        CliManagedPath { path: "GEMINI.md".to_string(), kind: "file/symlink", required: false },
-        CliManagedPath { path: ".mcp.json".to_string(), kind: "file", required: false },
-        CliManagedPath { path: "skills-lock.json".to_string(), kind: "file", required: false },
-        CliManagedPath { path: ".agents/skills/".to_string(), kind: "dir", required: false },
-        CliManagedPath { path: ".pi/".to_string(), kind: "dir", required: false },
+        CliManagedPath {
+            path: "SPEC.md".to_string(),
+            kind: "file",
+            required: false,
+        },
+        CliManagedPath {
+            path: "AGENTS.md".to_string(),
+            kind: "file",
+            required: false,
+        },
+        CliManagedPath {
+            path: "CLAUDE.md".to_string(),
+            kind: "file/symlink",
+            required: false,
+        },
+        CliManagedPath {
+            path: "GEMINI.md".to_string(),
+            kind: "file/symlink",
+            required: false,
+        },
+        CliManagedPath {
+            path: ".mcp.json".to_string(),
+            kind: "file",
+            required: false,
+        },
+        CliManagedPath {
+            path: "skills-lock.json".to_string(),
+            kind: "file",
+            required: false,
+        },
+        CliManagedPath {
+            path: ".agents/skills/".to_string(),
+            kind: "dir",
+            required: false,
+        },
+        CliManagedPath {
+            path: ".pi/".to_string(),
+            kind: "dir",
+            required: false,
+        },
     ]
 }
 
@@ -98,7 +128,10 @@ fn cli_next_actions(_project_path: &Path, items: &[SetupItem]) -> Vec<String> {
         .map(|i| i.label)
         .collect();
     if !missing.is_empty() {
-        notes.push(format!("Observed missing context files: {}.", missing.join(", ")));
+        notes.push(format!(
+            "Observed missing context files: {}.",
+            missing.join(", ")
+        ));
     }
     let stale: Vec<&str> = items
         .iter()
@@ -106,7 +139,10 @@ fn cli_next_actions(_project_path: &Path, items: &[SetupItem]) -> Vec<String> {
         .map(|i| i.label)
         .collect();
     if !stale.is_empty() {
-        notes.push(format!("Observed stale context files: {}.", stale.join(", ")));
+        notes.push(format!(
+            "Observed stale context files: {}.",
+            stale.join(", ")
+        ));
     }
     if notes.is_empty() {
         notes.push("All observed context files are present.".to_string());
@@ -130,7 +166,10 @@ pub(crate) fn inspect_project(path: &Path) -> CliProjectInspect {
         recommended_total,
         setup_complete,
         project_files: managed_project_paths(),
-        items: items.iter().map(|item| cli_setup_item(path, item)).collect(),
+        items: items
+            .iter()
+            .map(|item| cli_setup_item(path, item))
+            .collect(),
         next_actions: cli_next_actions(path, &items),
     }
 }
@@ -283,7 +322,10 @@ fn mcp_default_path(arguments: Option<&serde_json::Value>) -> Result<PathBuf, St
     }
 }
 
-fn mcp_tool_result(name: &str, arguments: Option<&serde_json::Value>) -> Result<serde_json::Value, String> {
+fn mcp_tool_result(
+    name: &str,
+    arguments: Option<&serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     match name {
         "px_project_inspect" => {
             let path = mcp_default_path(arguments)?;
@@ -309,7 +351,11 @@ fn mcp_success_response(id: serde_json::Value, result: serde_json::Value) -> ser
     })
 }
 
-fn mcp_error_response(id: Option<serde_json::Value>, code: i64, message: &str) -> serde_json::Value {
+fn mcp_error_response(
+    id: Option<serde_json::Value>,
+    code: i64,
+    message: &str,
+) -> serde_json::Value {
     let mut response = serde_json::json!({
         "jsonrpc": "2.0",
         "error": {
@@ -324,8 +370,7 @@ fn mcp_error_response(id: Option<serde_json::Value>, code: i64, message: &str) -
 }
 
 fn write_mcp_message(stdout: &mut impl Write, value: &serde_json::Value) -> io::Result<()> {
-    let body = serde_json::to_vec(value)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+    let body = serde_json::to_vec(value).map_err(|e| io::Error::other(e.to_string()))?;
     write!(stdout, "Content-Length: {}\r\n\r\n", body.len())?;
     stdout.write_all(&body)?;
     stdout.flush()
@@ -347,7 +392,10 @@ fn read_mcp_message(stdin: &mut impl BufRead) -> io::Result<Option<serde_json::V
         }
     }
     let Some(length) = content_length else {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length header"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "missing Content-Length header",
+        ));
     };
     let mut body = vec![0u8; length];
     stdin.read_exact(&mut body)?;
@@ -423,7 +471,10 @@ fn run_mcp_server() -> io::Result<()> {
                         })
                         .collect();
                     Some(mcp_success_response(
-                        message.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                        message
+                            .get("id")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null),
                         serde_json::json!({ "tools": tools }),
                     ))
                 }
@@ -432,41 +483,51 @@ fn run_mcp_server() -> io::Result<()> {
                 if !initialized {
                     Some(mcp_error_response(id, -32002, "server not initialized"))
                 } else {
-                    let name = params
-                        .and_then(|p| p.get("name"))
-                        .and_then(|v| v.as_str());
+                    let name = params.and_then(|p| p.get("name")).and_then(|v| v.as_str());
                     match name {
-                        Some(name) => match mcp_tool_result(name, params.and_then(|p| p.get("arguments"))) {
-                            Ok(value) => {
-                                let text = serde_json::to_string_pretty(&value)
-                                    .unwrap_or_else(|_| "{}".to_string());
-                                Some(mcp_success_response(
-                                    message.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                        Some(name) => {
+                            match mcp_tool_result(name, params.and_then(|p| p.get("arguments"))) {
+                                Ok(value) => {
+                                    let text = serde_json::to_string_pretty(&value)
+                                        .unwrap_or_else(|_| "{}".to_string());
+                                    Some(mcp_success_response(
+                                        message
+                                            .get("id")
+                                            .cloned()
+                                            .unwrap_or(serde_json::Value::Null),
+                                        serde_json::json!({
+                                            "content": [
+                                                {
+                                                    "type": "text",
+                                                    "text": text
+                                                }
+                                            ],
+                                            "structuredContent": value
+                                        }),
+                                    ))
+                                }
+                                Err(err) => Some(mcp_success_response(
+                                    message
+                                        .get("id")
+                                        .cloned()
+                                        .unwrap_or(serde_json::Value::Null),
                                     serde_json::json!({
                                         "content": [
                                             {
                                                 "type": "text",
-                                                "text": text
+                                                "text": format!("Error: {err}")
                                             }
                                         ],
-                                        "structuredContent": value
+                                        "isError": true
                                     }),
-                                ))
+                                )),
                             }
-                            Err(err) => Some(mcp_success_response(
-                                message.get("id").cloned().unwrap_or(serde_json::Value::Null),
-                                serde_json::json!({
-                                    "content": [
-                                        {
-                                            "type": "text",
-                                            "text": format!("Error: {err}")
-                                        }
-                                    ],
-                                    "isError": true
-                                }),
-                            )),
-                        },
-                        None => Some(mcp_error_response(id, -32602, "tools/call requires a string `name`")),
+                        }
+                        None => Some(mcp_error_response(
+                            id,
+                            -32602,
+                            "tools/call requires a string `name`",
+                        )),
                     }
                 }
             }

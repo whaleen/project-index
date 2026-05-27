@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "project-index-release": {
+      "computedHash": "f0e787e58fa44d9f6ecdf5562753c62752585f8a98eaa6322a57164a6932b57b",
+      "source": "local/project-index",
+      "sourceType": "local"
+    }
+  }
+}

@@ -93,7 +93,6 @@ impl AgentKind {
             AgentKind::Pi => format!("pi --session {}", session_id),
         }
     }
-
 }
 
 #[derive(Clone)]
@@ -108,8 +107,14 @@ pub(crate) struct AgentSession {
 #[derive(PartialEq, Clone)]
 pub(crate) enum SessionsState {
     List,
-    NewPicker { agent_idx: usize, prompt_idx: Option<usize> },
-    Summary { lines: Vec<String>, scroll: usize },
+    NewPicker {
+        agent_idx: usize,
+        prompt_idx: Option<usize>,
+    },
+    Summary {
+        lines: Vec<String>,
+        scroll: usize,
+    },
 }
 
 #[derive(PartialEq, Clone)]
@@ -152,13 +157,20 @@ pub(crate) fn load_memory_files(dir: &Path) -> Vec<MemoryFile> {
             }
             let name = path.file_stem()?.to_str()?.to_string();
             let content = fs::read_to_string(&path).unwrap_or_default();
-            Some(MemoryFile { origin: None, name, path, content })
+            Some(MemoryFile {
+                origin: None,
+                name,
+                path,
+                content,
+            })
         })
         .collect()
 }
 
 pub(crate) fn codex_memory_dirs(project_path: &Path) -> Vec<PathBuf> {
-    let Some(home) = dirs_home() else { return vec![] };
+    let Some(home) = dirs_home() else {
+        return vec![];
+    };
     let base = home.join(".codex").join("memories");
     let repo_name = project_path
         .file_name()
@@ -167,11 +179,17 @@ pub(crate) fn codex_memory_dirs(project_path: &Path) -> Vec<PathBuf> {
         .to_string();
     let sanitized = sanitize_project_component(project_path);
     let candidates = vec![base.join(&repo_name), base.join(&sanitized)];
-    candidates.into_iter().filter(|path| path.is_dir()).collect()
+    candidates
+        .into_iter()
+        .filter(|path| path.is_dir())
+        .collect()
 }
 
 pub(crate) fn gemini_memory_path() -> PathBuf {
-    dirs_home().unwrap_or_default().join(".gemini").join("GEMINI.md")
+    dirs_home()
+        .unwrap_or_default()
+        .join(".gemini")
+        .join("GEMINI.md")
 }
 
 // ── Sessions persistence ──────────────────────────────────────────────────────
@@ -241,9 +259,14 @@ pub(crate) fn resolve_sessions(sessions: &mut Vec<AgentSession>, project_path: &
             .collect();
 
         for idx in unresolved {
-            let Ok(session_time) = chrono_parse(&sessions[idx].started_at) else { continue };
+            let Ok(session_time) = chrono_parse(&sessions[idx].started_at) else {
+                continue;
+            };
             if let Some((jsonl_path, uuid, _)) = all_jsonl.iter().find(|(_, _, mtime)| {
-                let secs = mtime.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                let secs = mtime
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
                 (secs as i64 - session_time as i64).abs() < 120
             }) {
                 let first_msg = read_first_user_message(jsonl_path);
@@ -254,16 +277,17 @@ pub(crate) fn resolve_sessions(sessions: &mut Vec<AgentSession>, project_path: &
             }
         }
 
-        let known_ids: std::collections::HashSet<String> = sessions
-            .iter()
-            .filter_map(|s| s.id.clone())
-            .collect();
+        let known_ids: std::collections::HashSet<String> =
+            sessions.iter().filter_map(|s| s.id.clone()).collect();
 
         for (jsonl_path, uuid, mtime) in &all_jsonl {
             if known_ids.contains(uuid) {
                 continue;
             }
-            let secs = mtime.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let secs = mtime
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             let started_at = unix_to_iso(secs);
             let first_message = read_first_user_message(jsonl_path);
             sessions.push(AgentSession {
@@ -292,33 +316,43 @@ fn import_codex_sessions(sessions: &mut Vec<AgentSession>, project_path: &Path) 
         return;
     }
 
-    let known_ids: std::collections::HashSet<String> = sessions
-        .iter()
-        .filter_map(|s| s.id.clone())
-        .collect();
+    let known_ids: std::collections::HashSet<String> =
+        sessions.iter().filter_map(|s| s.id.clone()).collect();
 
     let project_str = project_path.to_string_lossy().to_string();
 
     let year_dirs: Vec<PathBuf> = fs::read_dir(&sessions_dir)
-        .into_iter().flatten().filter_map(|e| e.ok())
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        .map(|e| e.path()).collect();
+        .map(|e| e.path())
+        .collect();
 
     for year_dir in year_dirs {
         let month_dirs: Vec<PathBuf> = fs::read_dir(&year_dir)
-            .into_iter().flatten().filter_map(|e| e.ok())
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
             .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .map(|e| e.path()).collect();
+            .map(|e| e.path())
+            .collect();
         for month_dir in month_dirs {
             let day_dirs: Vec<PathBuf> = fs::read_dir(&month_dir)
-                .into_iter().flatten().filter_map(|e| e.ok())
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                .map(|e| e.path()).collect();
+                .map(|e| e.path())
+                .collect();
             for day_dir in day_dirs {
                 let jsonl_files: Vec<PathBuf> = fs::read_dir(&day_dir)
-                    .into_iter().flatten().filter_map(|e| e.ok())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|e| e.ok())
                     .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("jsonl"))
-                    .map(|e| e.path()).collect();
+                    .map(|e| e.path())
+                    .collect();
                 for jsonl in jsonl_files {
                     if let Some(session) = parse_codex_session(&jsonl, &project_str, &known_ids) {
                         sessions.push(session);
@@ -398,18 +432,24 @@ fn import_pi_sessions(sessions: &mut Vec<AgentSession>, project_path: &Path) {
         Some(h) => h.join(".pi").join("agent").join("sessions"),
         None => return,
     };
-    if !sessions_dir.exists() { return; }
+    if !sessions_dir.exists() {
+        return;
+    }
 
     let project_dir = sessions_dir.join(pi_encode_path(project_path));
-    if !project_dir.exists() { return; }
+    if !project_dir.exists() {
+        return;
+    }
 
-    let known_ids: std::collections::HashSet<String> = sessions
-        .iter().filter_map(|s| s.id.clone()).collect();
+    let known_ids: std::collections::HashSet<String> =
+        sessions.iter().filter_map(|s| s.id.clone()).collect();
 
     let project_str = project_path.to_string_lossy();
 
     let jsonl_files: Vec<PathBuf> = fs::read_dir(&project_dir)
-        .into_iter().flatten().filter_map(|e| e.ok())
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("jsonl"))
         .map(|e| e.path())
         .collect();
@@ -420,24 +460,44 @@ fn import_pi_sessions(sessions: &mut Vec<AgentSession>, project_path: &Path) {
             Some(i) => stem[i + 1..].to_string(),
             None => continue,
         };
-        if known_ids.contains(&id) { continue; }
+        if known_ids.contains(&id) {
+            continue;
+        }
 
-        let content = match fs::read_to_string(&path) { Ok(c) => c, Err(_) => continue };
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
         let first_line = content.lines().next().unwrap_or("");
-        let meta: serde_json::Value = match serde_json::from_str(first_line) { Ok(v) => v, Err(_) => continue };
+        let meta: serde_json::Value = match serde_json::from_str(first_line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
 
-        if meta.get("type").and_then(|t| t.as_str()) != Some("session") { continue; }
+        if meta.get("type").and_then(|t| t.as_str()) != Some("session") {
+            continue;
+        }
 
         let cwd = meta.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
-        if cwd != project_str.as_ref() { continue; }
+        if cwd != project_str.as_ref() {
+            continue;
+        }
 
-        let started_at = meta.get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let started_at = meta
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         let first_message = content.lines().find_map(|line| {
             let v: serde_json::Value = serde_json::from_str(line).ok()?;
-            if v.get("type").and_then(|t| t.as_str()) != Some("message") { return None; }
+            if v.get("type").and_then(|t| t.as_str()) != Some("message") {
+                return None;
+            }
             let msg = v.get("message")?;
-            if msg.get("role").and_then(|r| r.as_str()) != Some("user") { return None; }
+            if msg.get("role").and_then(|r| r.as_str()) != Some("user") {
+                return None;
+            }
             for block in msg.get("content")?.as_array()? {
                 if block.get("type").and_then(|t| t.as_str()) == Some("text") {
                     let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
@@ -460,11 +520,15 @@ fn import_pi_sessions(sessions: &mut Vec<AgentSession>, project_path: &Path) {
 }
 
 fn import_gemini_sessions(sessions: &mut Vec<AgentSession>, project_path: &Path) {
-    let home = match dirs_home() { Some(h) => h, None => return };
+    let home = match dirs_home() {
+        Some(h) => h,
+        None => return,
+    };
     let gemini_dir = home.join(".gemini");
     let project_str = project_path.to_string_lossy();
 
-    let project_name: Option<String> = fs::read_to_string(gemini_dir.join("projects.json")).ok()
+    let project_name: Option<String> = fs::read_to_string(gemini_dir.join("projects.json"))
+        .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| {
             v.get("projects")?
@@ -473,8 +537,8 @@ fn import_gemini_sessions(sessions: &mut Vec<AgentSession>, project_path: &Path)
                 .map(|s| s.to_string())
         });
 
-    let known_ids: std::collections::HashSet<String> = sessions
-        .iter().filter_map(|s| s.id.clone()).collect();
+    let known_ids: std::collections::HashSet<String> =
+        sessions.iter().filter_map(|s| s.id.clone()).collect();
 
     let mut chats_dirs: Vec<PathBuf> = Vec::new();
     if let Some(ref name) = project_name {
@@ -482,43 +546,67 @@ fn import_gemini_sessions(sessions: &mut Vec<AgentSession>, project_path: &Path)
     }
 
     for chats_dir in chats_dirs {
-        if !chats_dir.exists() { continue; }
+        if !chats_dir.exists() {
+            continue;
+        }
 
         let json_files: Vec<PathBuf> = fs::read_dir(&chats_dir)
-            .into_iter().flatten().filter_map(|e| e.ok())
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
             .map(|e| e.path())
             .collect();
 
         for path in json_files {
-            let content = match fs::read_to_string(&path) { Ok(c) => c, Err(_) => continue };
-            let v: serde_json::Value = match serde_json::from_str(&content) { Ok(v) => v, Err(_) => continue };
+            let content = match fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let v: serde_json::Value = match serde_json::from_str(&content) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
 
             let id = match v.get("sessionId").and_then(|s| s.as_str()) {
                 Some(id) => id.to_string(),
                 None => continue,
             };
-            if known_ids.contains(&id) { continue; }
+            if known_ids.contains(&id) {
+                continue;
+            }
 
-            let started_at = v.get("startTime").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            let started_at = v
+                .get("startTime")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
 
-            let first_message = v.get("messages")
+            let first_message = v
+                .get("messages")
                 .and_then(|m| m.as_array())
-                .and_then(|msgs| msgs.iter().find_map(|msg| {
-                    if msg.get("type").and_then(|t| t.as_str()) != Some("user") { return None; }
-                    let content = msg.get("content")?;
-                    if let Some(arr) = content.as_array() {
-                        for block in arr {
-                            let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
-                            if !text.is_empty() {
-                                return Some(text.chars().take(80).collect::<String>());
-                            }
+                .and_then(|msgs| {
+                    msgs.iter().find_map(|msg| {
+                        if msg.get("type").and_then(|t| t.as_str()) != Some("user") {
+                            return None;
                         }
-                        None
-                    } else {
-                        content.as_str().filter(|s| !s.is_empty()).map(|s| s.chars().take(80).collect())
-                    }
-                }));
+                        let content = msg.get("content")?;
+                        if let Some(arr) = content.as_array() {
+                            for block in arr {
+                                let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                                if !text.is_empty() {
+                                    return Some(text.chars().take(80).collect::<String>());
+                                }
+                            }
+                            None
+                        } else {
+                            content
+                                .as_str()
+                                .filter(|s| !s.is_empty())
+                                .map(|s| s.chars().take(80).collect())
+                        }
+                    })
+                });
 
             sessions.push(AgentSession {
                 id: Some(id),
@@ -543,7 +631,10 @@ fn chrono_parse(s: &str) -> Result<u64, ()> {
         return Err(());
     }
     let days_since_epoch = (date[0] - 1970) * 365 + (date[1] - 1) * 30 + date[2];
-    let secs = days_since_epoch * 86400 + time[0] * 3600 + time[1] * 60 + time.get(2).copied().unwrap_or(0);
+    let secs = days_since_epoch * 86400
+        + time[0] * 3600
+        + time[1] * 60
+        + time.get(2).copied().unwrap_or(0);
     Ok(secs)
 }
 
@@ -592,7 +683,10 @@ fn parse_session_turns(path: &Path) -> Vec<SessionTurn> {
                 {
                     let text = text.trim().to_string();
                     if !text.is_empty() {
-                        turns.push(SessionTurn { role: "user".into(), text });
+                        turns.push(SessionTurn {
+                            role: "user".into(),
+                            text,
+                        });
                     }
                 }
             }
@@ -606,7 +700,10 @@ fn parse_session_turns(path: &Path) -> Vec<SessionTurn> {
                         .iter()
                         .filter_map(|block| {
                             if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                block.get("text").and_then(|t| t.as_str()).map(|s| s.trim().to_string())
+                                block
+                                    .get("text")
+                                    .and_then(|t| t.as_str())
+                                    .map(|s| s.trim().to_string())
                             } else {
                                 None
                             }
@@ -614,7 +711,10 @@ fn parse_session_turns(path: &Path) -> Vec<SessionTurn> {
                         .collect::<Vec<_>>()
                         .join("\n");
                     if !text.is_empty() {
-                        turns.push(SessionTurn { role: "assistant".into(), text });
+                        turns.push(SessionTurn {
+                            role: "assistant".into(),
+                            text,
+                        });
                     }
                 }
             }
@@ -630,7 +730,14 @@ pub(crate) fn session_summary_from_path(turns_path: &Path) -> Vec<String> {
         .iter()
         .filter(|t| t.role == "user")
         .map(|t| {
-            let line: String = t.text.lines().next().unwrap_or("").chars().take(100).collect();
+            let line: String = t
+                .text
+                .lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(100)
+                .collect();
             format!("• {}", line)
         })
         .collect()
@@ -647,33 +754,39 @@ pub(crate) fn session_is_exported(session: &AgentSession, project_path: &Path) -
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok())
-        .any(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .contains(short_id)
-        })
+        .any(|e| e.file_name().to_string_lossy().contains(short_id))
 }
 
-pub(crate) fn jsonl_path_for_session(session: &AgentSession, project_path: &Path) -> Option<PathBuf> {
+pub(crate) fn jsonl_path_for_session(
+    session: &AgentSession,
+    project_path: &Path,
+) -> Option<PathBuf> {
     let id = session.id.as_ref()?;
     match session.agent {
         AgentKind::Claude => {
             for dir in claude_project_dirs(project_path) {
                 let p = dir.join(format!("{}.jsonl", id));
-                if p.exists() { return Some(p); }
+                if p.exists() {
+                    return Some(p);
+                }
             }
             None
         }
         AgentKind::Pi => {
             let home = dirs_home()?;
-            let pi_dir = home.join(".pi").join("agent").join("sessions")
+            let pi_dir = home
+                .join(".pi")
+                .join("agent")
+                .join("sessions")
                 .join(pi_encode_path(project_path));
-            fs::read_dir(&pi_dir).ok()?
+            fs::read_dir(&pi_dir)
+                .ok()?
                 .filter_map(|e| e.ok())
                 .find(|e| {
                     let p = e.path();
                     p.extension().and_then(|x| x.to_str()) == Some("jsonl")
-                        && p.file_stem().and_then(|s| s.to_str())
+                        && p.file_stem()
+                            .and_then(|s| s.to_str())
                             .map(|stem| stem.ends_with(id.as_str()))
                             .unwrap_or(false)
                 })
@@ -693,19 +806,48 @@ pub(crate) fn unix_to_iso(secs: u64) -> String {
     let mut year = 1970u64;
     let mut days = day_total;
     loop {
-        let y_days = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
-        if days < y_days { break; }
+        let y_days = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if days < y_days {
+            break;
+        }
         days -= y_days;
         year += 1;
     }
-    let month_days = [31u64, if year % 4 == 0 { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days = [
+        31u64,
+        if year % 4 == 0 { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 0usize;
     for &md in &month_days {
-        if days < md { break; }
+        if days < md {
+            break;
+        }
         days -= md;
         month += 1;
     }
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month + 1, days + 1, hour, min, sec)
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year,
+        month + 1,
+        days + 1,
+        hour,
+        min,
+        sec
+    )
 }
 
 pub(crate) fn now_iso() -> String {

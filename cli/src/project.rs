@@ -124,17 +124,30 @@ pub(crate) fn scan_setup_all(path: &Path) -> Vec<SetupItem> {
 
 pub(crate) fn scan_setup_unfiltered(path: &Path) -> Vec<SetupItem> {
     let spec_ok = path.join("SPEC.md").exists();
-    let claude_ok = { let p = path.join("CLAUDE.md"); p.is_symlink() || p.exists() };
-    let agents_ok = { let p = path.join("AGENTS.md"); p.is_symlink() || p.exists() };
-    let gemini_ok = { let p = path.join("GEMINI.md"); p.is_symlink() || p.exists() };
-    let mcp_ok    = path.join(".mcp.json").exists();
+    let claude_ok = {
+        let p = path.join("CLAUDE.md");
+        p.is_symlink() || p.exists()
+    };
+    let agents_ok = {
+        let p = path.join("AGENTS.md");
+        p.is_symlink() || p.exists()
+    };
+    let gemini_ok = {
+        let p = path.join("GEMINI.md");
+        p.is_symlink() || p.exists()
+    };
+    let mcp_ok = path.join(".mcp.json").exists();
 
     vec![
         SetupItem {
             label: "SPEC.md",
             detail: "project contract artifact".to_string(),
             category: SetupCategory::Recommended,
-            status: if spec_ok { SetupStatus::Ok } else { SetupStatus::Missing },
+            status: if spec_ok {
+                SetupStatus::Ok
+            } else {
+                SetupStatus::Missing
+            },
             gitignore_path: None,
             gitignored: false,
         },
@@ -142,7 +155,11 @@ pub(crate) fn scan_setup_unfiltered(path: &Path) -> Vec<SetupItem> {
             label: "CLAUDE.md",
             detail: "Claude Code context file".to_string(),
             category: SetupCategory::Recommended,
-            status: if claude_ok { SetupStatus::Ok } else { SetupStatus::Missing },
+            status: if claude_ok {
+                SetupStatus::Ok
+            } else {
+                SetupStatus::Missing
+            },
             gitignore_path: None,
             gitignored: false,
         },
@@ -150,7 +167,11 @@ pub(crate) fn scan_setup_unfiltered(path: &Path) -> Vec<SetupItem> {
             label: "AGENTS.md",
             detail: "Codex / Pi context file".to_string(),
             category: SetupCategory::Recommended,
-            status: if agents_ok { SetupStatus::Ok } else { SetupStatus::Missing },
+            status: if agents_ok {
+                SetupStatus::Ok
+            } else {
+                SetupStatus::Missing
+            },
             gitignore_path: None,
             gitignored: false,
         },
@@ -158,7 +179,11 @@ pub(crate) fn scan_setup_unfiltered(path: &Path) -> Vec<SetupItem> {
             label: "GEMINI.md",
             detail: "Gemini CLI context file".to_string(),
             category: SetupCategory::Recommended,
-            status: if gemini_ok { SetupStatus::Ok } else { SetupStatus::Missing },
+            status: if gemini_ok {
+                SetupStatus::Ok
+            } else {
+                SetupStatus::Missing
+            },
             gitignore_path: None,
             gitignored: false,
         },
@@ -166,7 +191,11 @@ pub(crate) fn scan_setup_unfiltered(path: &Path) -> Vec<SetupItem> {
             label: ".mcp.json",
             detail: "MCP server definitions".to_string(),
             category: SetupCategory::Recommended,
-            status: if mcp_ok { SetupStatus::Ok } else { SetupStatus::Missing },
+            status: if mcp_ok {
+                SetupStatus::Ok
+            } else {
+                SetupStatus::Missing
+            },
             gitignore_path: None,
             gitignored: false,
         },
@@ -175,17 +204,20 @@ pub(crate) fn scan_setup_unfiltered(path: &Path) -> Vec<SetupItem> {
 
 pub(crate) fn setup_item_edit_path(project_path: &Path, item: &SetupItem) -> Option<PathBuf> {
     match item.label {
-        "SPEC.md"    => Some(project_path.join("SPEC.md")),
-        "CLAUDE.md"  => Some(project_path.join("CLAUDE.md")),
-        "AGENTS.md"  => Some(project_path.join("AGENTS.md")),
-        "GEMINI.md"  => Some(project_path.join("GEMINI.md")),
-        ".mcp.json"  => Some(project_path.join(".mcp.json")),
+        "SPEC.md" => Some(project_path.join("SPEC.md")),
+        "CLAUDE.md" => Some(project_path.join("CLAUDE.md")),
+        "AGENTS.md" => Some(project_path.join("AGENTS.md")),
+        "GEMINI.md" => Some(project_path.join("GEMINI.md")),
+        ".mcp.json" => Some(project_path.join(".mcp.json")),
         _ => None,
     }
 }
 
 pub(crate) fn setup_template_count(items: &[SetupItem]) -> usize {
-    items.iter().filter(|item| item.status == SetupStatus::Template).count()
+    items
+        .iter()
+        .filter(|item| item.status == SetupStatus::Template)
+        .count()
 }
 
 // ── Home data loading ─────────────────────────────────────────────────────────
@@ -193,7 +225,13 @@ pub(crate) fn setup_template_count(items: &[SetupItem]) -> usize {
 pub(crate) fn load_home_data(path: &Path, repo: &str) -> HomeData {
     let (gh_description, homepage, stars, forks, license, open_prs) = if !repo.is_empty() {
         let out = Command::new("gh")
-            .args(["repo", "view", repo, "--json", "description,homepageUrl,stargazerCount,forkCount,licenseInfo,pullRequests"])
+            .args([
+                "repo",
+                "view",
+                repo,
+                "--json",
+                "description,homepageUrl,stargazerCount,forkCount,licenseInfo,pullRequests",
+            ])
             .output()
             .ok()
             .filter(|o| o.status.success());
@@ -392,7 +430,14 @@ pub(crate) fn scan_projects(config: &Config) -> Vec<Project> {
     let mut candidates: Vec<(PathBuf, String)> = Vec::new();
 
     for base in &bases {
-        let Ok(level1) = fs::read_dir(base) else { continue };
+        let Ok(level1) = fs::read_dir(base) else {
+            continue;
+        };
+        let base_name = base
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
         let mut level1_dirs: Vec<_> = level1
             .filter_map(|e| e.ok())
             .filter(|e| e.path().is_dir())
@@ -410,7 +455,7 @@ pub(crate) fn scan_projects(config: &Config) -> Vec<Project> {
                 continue;
             }
             if path.join(".git").is_dir() {
-                candidates.push((path, String::new()));
+                candidates.push((path, base_name.clone()));
             } else if let Ok(level2) = fs::read_dir(&path) {
                 let mut level2_dirs: Vec<_> = level2
                     .filter_map(|e| e.ok())
@@ -471,7 +516,10 @@ pub(crate) fn project_info(path: &Path, group: String) -> Option<Project> {
         });
     let (branch, dirty_count, ahead, behind) = git_status_summary(path);
     let setup_items = scan_setup(path);
-    let recommended_ok = setup_items.iter().filter(|i| i.status == SetupStatus::Ok).count();
+    let recommended_ok = setup_items
+        .iter()
+        .filter(|i| i.status == SetupStatus::Ok)
+        .count();
     let recommended_total = setup_items.len();
     let mcp_ready = path.join(".mcp.json").exists();
     let template_count = setup_template_count(&setup_items);

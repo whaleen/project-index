@@ -1,10 +1,8 @@
 cli/target/
 
 # Local agent/runtime leftovers
-/.agents/
 /.claude/
 /.vite-hooks/
-/skills-lock.json
 /.pemguin/
 /.memory/
 /.prompts/

@@ -864,9 +864,9 @@ fn handle_key(app: &mut App, key: KeyCode, modifiers: KeyModifiers) -> bool {
                     KeyCode::Char('q') => return true,
                     KeyCode::Tab => {
                         let next = match &app.screen {
-                            Screen::InProject(ProjectTab::Home) => ProjectTab::Config,
-                            Screen::InProject(ProjectTab::Config) => ProjectTab::Issues,
-                            Screen::InProject(ProjectTab::Issues) => ProjectTab::Memories,
+                            Screen::InProject(ProjectTab::Home) => ProjectTab::Issues,
+                            Screen::InProject(ProjectTab::Issues) => ProjectTab::Config,
+                            Screen::InProject(ProjectTab::Config) => ProjectTab::Memories,
                             Screen::InProject(ProjectTab::Memories) => ProjectTab::Agents,
                             Screen::InProject(ProjectTab::Agents) => ProjectTab::Pane,
                             Screen::InProject(ProjectTab::Pane) => ProjectTab::Home,
@@ -880,11 +880,11 @@ fn handle_key(app: &mut App, key: KeyCode, modifiers: KeyModifiers) -> bool {
                         return false;
                     }
                     KeyCode::Char('2') => {
-                        app.set_project_tab(ProjectTab::Config);
+                        app.set_project_tab(ProjectTab::Issues);
                         return false;
                     }
                     KeyCode::Char('3') => {
-                        app.set_project_tab(ProjectTab::Issues);
+                        app.set_project_tab(ProjectTab::Config);
                         return false;
                     }
                     KeyCode::Char('4') => {
@@ -1156,20 +1156,19 @@ fn nav_row(app: &App) -> Line<'static> {
     let Screen::InProject(active_tab) = &app.screen else {
         return Line::from("");
     };
-    let repo_short = app.repo.split('/').last().unwrap_or(&app.repo).to_string();
     let mut spans: Vec<Span> = Vec::new();
     let tabs: &[(&str, &str, u8, bool)] = &[
         (
             "",
-            repo_short.as_str(),
+            "overview",
             1u8,
             *active_tab == ProjectTab::Home,
         ),
-        (I_SETUP, "config", 2, *active_tab == ProjectTab::Config),
-        (I_ISSUES, "issues", 3, *active_tab == ProjectTab::Issues),
+        (I_ISSUES, "github", 2, *active_tab == ProjectTab::Issues),
+        (I_SETUP, "context", 3, *active_tab == ProjectTab::Config),
         (I_MEMORY, "memories", 4, *active_tab == ProjectTab::Memories),
         (I_MCP, "agents", 5, *active_tab == ProjectTab::Agents),
-        (I_PANE, "pane", 6, *active_tab == ProjectTab::Pane),
+        (I_PANE, "tools", 6, *active_tab == ProjectTab::Pane),
     ];
     for (icon, label, n, active) in tabs {
         spans.extend(tab_span(icon, label, *n, *active));
@@ -1199,7 +1198,7 @@ fn draw_home(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(header_row(app)), outer[0]);
     frame.render_widget(Paragraph::new(nav_row(app)), outer[1]);
 
-    let title = format!(" {} ", app.repo);
+    let title = format!(" overview · {} ", app.repo);
     let block = Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(title);
 
     if let Some(data) = &app.home_data {
@@ -1215,18 +1214,28 @@ fn draw_home(frame: &mut Frame, app: &App) {
         let top_area = vsplit[0];
         let readme_area = vsplit[1];
 
-        // Top area: avatar | left_info | right_commits
+        // Top area: avatar | overview | recent activity on wide terminals.
+        // Narrow terminals collapse to one stacked overview column.
+        let compact_overview = inner.width < 100;
         let owner = app.repo.split('/').next().unwrap_or("");
-        let avatar_ansi = app.avatar_cache.get(owner);
+        let avatar_ansi = if compact_overview { None } else { app.avatar_cache.get(owner) };
         let avatar_w = if avatar_ansi.is_some() { 22u16 } else { 0 };
 
         let top_split = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(avatar_w),
-                Constraint::Percentage(52),
-                Constraint::Percentage(48),
-            ])
+            .constraints(if compact_overview {
+                [
+                    Constraint::Length(0),
+                    Constraint::Percentage(100),
+                    Constraint::Length(0),
+                ]
+            } else {
+                [
+                    Constraint::Length(avatar_w),
+                    Constraint::Percentage(52),
+                    Constraint::Percentage(48),
+                ]
+            })
             .split(top_area);
 
         if let Some(ansi) = avatar_ansi {
@@ -1235,6 +1244,22 @@ fn draw_home(frame: &mut Frame, app: &App) {
 
         // ── Left info column ──────────────────────────────────────────
         let mut left: Vec<Line> = vec![Line::from("")];
+
+        if let Some(project) = app.active_project_idx.and_then(|i| app.projects.get(i)) {
+            let mut state_spans = vec![
+                Span::styled("  branch  ", Style::default().fg(theme().fg_dim)),
+                Span::styled(project.branch.clone(), Style::default().fg(theme().purple)),
+                Span::raw("   "),
+                Span::styled("state ", Style::default().fg(theme().fg_dim)),
+            ];
+            state_spans.extend(changes_line(project).spans);
+            left.push(Line::from(state_spans));
+            left.push(Line::from(""));
+            let mut agent_spans = vec![Span::styled("  agents  ", Style::default().fg(theme().fg_dim))];
+            agent_spans.extend(agent_pill_spans(project, compact_overview));
+            left.push(Line::from(agent_spans));
+            left.push(Line::from(""));
+        }
 
         // Stats row: ★ stars  ⑂ forks  ! issues  ↳ PRs  license
         {
@@ -1403,11 +1428,6 @@ fn draw_home(frame: &mut Frame, app: &App) {
             }
         }
 
-        frame.render_widget(
-            Paragraph::new(left).wrap(Wrap { trim: false }),
-            top_split[1],
-        );
-
         // ── Right: recent commits ─────────────────────────────────────
         let mut right: Vec<Line> = vec![
             Line::from(Span::styled(
@@ -1447,10 +1467,27 @@ fn draw_home(frame: &mut Frame, app: &App) {
                 ]));
             }
         }
-        frame.render_widget(
-            Paragraph::new(right).wrap(Wrap { trim: false }),
-            top_split[2],
-        );
+        if compact_overview {
+            left.push(Line::from(""));
+            left.push(Line::from(Span::styled(
+                format!("  {I_COMMIT} recent activity"),
+                Style::default().fg(theme().fg_xdim),
+            )));
+            left.extend(right.into_iter().skip(2).take(8));
+            frame.render_widget(
+                Paragraph::new(left).wrap(Wrap { trim: false }),
+                top_split[1],
+            );
+        } else {
+            frame.render_widget(
+                Paragraph::new(left).wrap(Wrap { trim: false }),
+                top_split[1],
+            );
+            frame.render_widget(
+                Paragraph::new(right).wrap(Wrap { trim: false }),
+                top_split[2],
+            );
+        }
 
         // ── README section ────────────────────────────────────────────
         let readme_block = Block::default()
@@ -1530,7 +1567,7 @@ fn draw_home(frame: &mut Frame, app: &App) {
 
     frame.render_widget(
         Paragraph::new(footer(&[
-            ("c", "config"),
+            ("c", "context"),
             ("r", "reload"),
             ("y", "copy url"),
             ("jk", "scroll readme"),
@@ -1586,7 +1623,7 @@ fn draw_issues(frame: &mut Frame, app: &App) {
                     Style::default().fg(theme().red),
                 )),
             ])
-            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" issues ")),
+            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" github · issues ")),
             outer[2],
         );
     } else if app.issues_loading {
@@ -1598,7 +1635,7 @@ fn draw_issues(frame: &mut Frame, app: &App) {
                     Style::default().fg(theme().fg_xdim),
                 )),
             ])
-            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" issues ")),
+            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" github · issues ")),
             outer[2],
         );
     } else if app.issues.is_empty() {
@@ -1610,7 +1647,7 @@ fn draw_issues(frame: &mut Frame, app: &App) {
                     Style::default().fg(Color::DarkGray),
                 )),
             ])
-            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" issues ")),
+            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" github · issues ")),
             outer[2],
         );
     } else {
@@ -1698,86 +1735,452 @@ fn draw_issues(frame: &mut Frame, app: &App) {
     );
 }
 
+fn project_agent_coverage(project: &Project) -> [bool; 5] {
+    let has_agents = {
+        let p = project.path.join("AGENTS.md");
+        p.is_symlink() || p.exists()
+    };
+    [
+        {
+            let p = project.path.join("CLAUDE.md");
+            p.is_symlink() || p.exists()
+        },
+        has_agents,
+        has_agents,
+        {
+            let p = project.path.join("GEMINI.md");
+            p.is_symlink() || p.exists()
+        },
+        project.mcp_ready,
+    ]
+}
+
+fn agent_pill_spans(project: &Project, compact: bool) -> Vec<Span<'static>> {
+    let coverage = project_agent_coverage(project);
+    let labels = ["Cl", "Cx", "Pi", "Ge", "MCP"];
+    let colors = [
+        theme().purple,
+        theme().green,
+        theme().accent,
+        theme().yellow,
+        theme().red,
+    ];
+    let mut spans = Vec::new();
+
+    for (idx, label) in labels.iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::raw(if compact { " " } else { "  " }));
+        }
+        if coverage[idx] {
+            if compact {
+                spans.push(Span::styled(
+                    (*label).to_string(),
+                    Style::default()
+                        .fg(colors[idx])
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    format!(" {label} "),
+                    Style::default()
+                        .fg(theme().sel_fg)
+                        .bg(colors[idx])
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
+        } else if compact {
+            spans.push(Span::styled("··", Style::default().fg(theme().fg_xdim)));
+        } else {
+            spans.push(Span::styled(
+                format!(" {label} "),
+                Style::default().fg(theme().fg_xdim),
+            ));
+        }
+    }
+    spans
+}
+
+fn agent_coverage_count(project: &Project) -> usize {
+    project_agent_coverage(project)
+        .iter()
+        .filter(|covered| **covered)
+        .count()
+}
+
+fn changes_line(project: &Project) -> Line<'static> {
+    let mut spans: Vec<Span> = vec![];
+    if project.dirty_count > 0 {
+        spans.push(Span::styled(
+            format!("●{}", project.dirty_count),
+            Style::default().fg(theme().yellow),
+        ));
+    }
+    if project.commits_ahead > 0 {
+        if !spans.is_empty() {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(
+            format!("↑{}", project.commits_ahead),
+            Style::default().fg(theme().purple),
+        ));
+    }
+    if project.commits_behind > 0 {
+        if !spans.is_empty() {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(
+            format!("↓{}", project.commits_behind),
+            Style::default().fg(theme().red),
+        ));
+    }
+    if spans.is_empty() {
+        spans.push(Span::styled("clean", Style::default().fg(theme().fg_xdim)));
+    }
+    Line::from(spans)
+}
+
+fn selected_project<'a>(app: &'a App) -> Option<&'a Project> {
+    app.project_list_state
+        .selected()
+        .and_then(|entry_idx| app.project_entries.get(entry_idx))
+        .and_then(|entry| match entry {
+            ProjectEntry::Item(proj_idx) => app.projects.get(*proj_idx),
+            ProjectEntry::Group(_) => None,
+        })
+}
+
+fn draw_projects_dashboard(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let repos = app.projects.len();
+    let dirty_repos = app.projects.iter().filter(|p| p.dirty_count > 0).count();
+    let behind_repos = app.projects.iter().filter(|p| p.commits_behind > 0).count();
+    let total_issues: u32 = app
+        .projects
+        .iter()
+        .filter_map(|p| app.meta_cache.get(&p.repo).and_then(|m| m.open_issues))
+        .sum();
+    let covered = app
+        .projects
+        .iter()
+        .filter(|p| agent_coverage_count(p) > 0)
+        .count();
+
+    let mut spans = vec![
+        Span::styled(
+            format!(" {repos} repos "),
+            Style::default().fg(theme().fg_dim),
+        ),
+        Span::styled(
+            format!(" {dirty_repos} dirty "),
+            Style::default().fg(if dirty_repos > 0 {
+                theme().yellow
+            } else {
+                theme().fg_xdim
+            }),
+        ),
+        Span::styled(
+            format!(" {behind_repos} behind "),
+            Style::default().fg(if behind_repos > 0 {
+                theme().red
+            } else {
+                theme().fg_xdim
+            }),
+        ),
+        Span::styled(
+            format!(" {total_issues} issues "),
+            Style::default().fg(if total_issues > 0 {
+                theme().red
+            } else {
+                theme().fg_xdim
+            }),
+        ),
+        Span::styled(
+            format!(" {covered}/{repos} with agent coverage "),
+            Style::default().fg(theme().purple),
+        ),
+    ];
+    if app.projects_loading {
+        spans.push(Span::styled(
+            " scanning…",
+            Style::default().fg(theme().accent),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn draw_project_preview(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+    if let Some(project) = selected_project(app) {
+        let repo = project
+            .repo
+            .split('/')
+            .last()
+            .unwrap_or(&project.repo)
+            .to_string();
+        lines.push(Line::from(Span::styled(
+            repo,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            project.path.display().to_string(),
+            Style::default().fg(theme().fg_xdim),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("branch  ", Style::default().fg(theme().fg_dim)),
+            Span::styled(project.branch.clone(), Style::default().fg(theme().purple)),
+        ]));
+        let mut state_spans = vec![Span::styled(
+            "state   ",
+            Style::default().fg(theme().fg_dim),
+        )];
+        state_spans.extend(changes_line(project).spans);
+        lines.push(Line::from(state_spans));
+        if let Some(meta) = app.meta_cache.get(&project.repo) {
+            if let Some(lang) = &meta.language {
+                lines.push(Line::from(vec![
+                    Span::styled("lang    ", Style::default().fg(theme().fg_dim)),
+                    Span::styled(lang.clone(), Style::default().fg(theme().purple)),
+                ]));
+            }
+            if let Some(issues) = meta.open_issues {
+                lines.push(Line::from(vec![
+                    Span::styled("issues  ", Style::default().fg(theme().fg_dim)),
+                    Span::styled(
+                        issues.to_string(),
+                        Style::default().fg(if issues > 0 {
+                            theme().red
+                        } else {
+                            theme().fg_xdim
+                        }),
+                    ),
+                ]));
+            }
+            if let Some(pushed) = &meta.pushed_at {
+                lines.push(Line::from(vec![
+                    Span::styled("pushed  ", Style::default().fg(theme().fg_dim)),
+                    Span::styled(relative_date(pushed), Style::default().fg(theme().fg_xdim)),
+                ]));
+            }
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "agents",
+            Style::default().fg(theme().fg_dim),
+        )));
+        lines.push(Line::from(agent_pill_spans(project, false)));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "legend",
+            Style::default().fg(theme().fg_dim),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Cl Claude  Cx Codex  Pi Pi",
+            Style::default().fg(theme().fg_xdim),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Ge Gemini  MCP servers",
+            Style::default().fg(theme().fg_xdim),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Select a project",
+            Style::default().fg(theme().fg_xdim),
+        )));
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(" preview "),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
 fn draw_projects(frame: &mut Frame, app: &App) {
     let area = frame.area();
+    let show_dashboard = !app.projects.is_empty();
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
+            Constraint::Length(if show_dashboard { 1 } else { 0 }),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
         .split(area);
 
     frame.render_widget(Paragraph::new(header_row(app)), outer[0]);
+    if show_dashboard {
+        draw_projects_dashboard(frame, app, outer[1]);
+    }
 
     if app.projects_loading && app.projects.is_empty() {
+        let roots: Vec<Line> = app
+            .config
+            .projects
+            .roots
+            .iter()
+            .take(4)
+            .map(|root| {
+                Line::from(Span::styled(
+                    format!("    {root}"),
+                    Style::default().fg(theme().fg_xdim),
+                ))
+            })
+            .collect();
+        let mut lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Scanning watched roots…",
+                Style::default().fg(theme().fg_dim),
+            )),
+            Line::from(""),
+        ];
+        lines.extend(roots);
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  The UI stays live while the scan runs.",
+            Style::default().fg(Color::DarkGray),
+        )));
         frame.render_widget(
-            Paragraph::new(vec![
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  Scanning projects...",
-                    Style::default().fg(theme().fg_dim),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  The UI stays live while the scan runs.",
-                    Style::default().fg(Color::DarkGray),
-                )),
-            ])
-            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" projects ")),
-            outer[1],
+            Paragraph::new(lines).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(" projects "),
+            ),
+            outer[2],
         );
     } else if app.projects.is_empty() {
+        let roots: Vec<Line> = app
+            .config
+            .projects
+            .roots
+            .iter()
+            .take(5)
+            .map(|root| {
+                Line::from(Span::styled(
+                    format!("    {root}"),
+                    Style::default().fg(theme().fg_xdim),
+                ))
+            })
+            .collect();
+        let mut lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  No projects found.",
+                Style::default().fg(theme().fg_dim),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Watched roots:",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+        lines.extend(roots);
+        lines.extend([
+            Line::from(""),
+            Line::from(Span::styled(
+                "  px scans for .git directories up to 2 levels deep.",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Add watched directories to ~/.project-index.toml:",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "    [projects]",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(
+                "    roots = [\"~/code\", \"~/work\", \"~/personal\"]",
+                Style::default().fg(theme().accent),
+            )),
+        ]);
         frame.render_widget(
-            Paragraph::new(vec![
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  No projects found.",
-                    Style::default().fg(theme().fg_dim),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  Add watched directories to ~/.project-index.toml:",
-                    Style::default().fg(Color::DarkGray),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "    [projects]",
-                    Style::default().fg(Color::DarkGray),
-                )),
-                Line::from(Span::styled(
-                    "    roots = [\"~/code\", \"~/work\", \"~/personal\"]",
-                    Style::default().fg(theme().accent),
-                )),
-            ])
-            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" projects ")),
-            outer[1],
+            Paragraph::new(lines).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(" projects "),
+            ),
+            outer[2],
         );
     } else {
-        // Build table rows from project entries (group headers + project items)
+        let width = outer[2].width;
+        let compact = width < 80;
+        let standard = width < 120;
+        let show_preview = width >= 132;
+        let main = if show_preview {
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Min(72), Constraint::Length(42)])
+                .split(outer[2])
+        } else {
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(100)])
+                .split(outer[2])
+        };
+
         let rows: Vec<Row> = app
             .project_entries
             .iter()
             .map(|entry| match entry {
-                ProjectEntry::Group(name) => Row::new(vec![
-                    Cell::from(Span::styled(
-                        format!("  {name}"),
-                        Style::default().fg(theme().purple).add_modifier(Modifier::BOLD),
-                    )),
-                    Cell::from(""),
-                    Cell::from(""),
-                    Cell::from(""),
-                    Cell::from(""),
-                    Cell::from(""),
-                    Cell::from(""),
-                ]),
+                ProjectEntry::Group(name) => {
+                    if compact {
+                        Row::new(vec![
+                            Cell::from(Span::styled(
+                                format!("  {name}"),
+                                Style::default()
+                                    .fg(theme().purple)
+                                    .add_modifier(Modifier::BOLD),
+                            )),
+                            Cell::from(""),
+                        ])
+                    } else if standard {
+                        Row::new(vec![
+                            Cell::from(Span::styled(
+                                format!("  {name}"),
+                                Style::default()
+                                    .fg(theme().purple)
+                                    .add_modifier(Modifier::BOLD),
+                            )),
+                            Cell::from(""),
+                            Cell::from(""),
+                            Cell::from(""),
+                            Cell::from(""),
+                        ])
+                    } else {
+                        Row::new(vec![
+                            Cell::from(Span::styled(
+                                format!("  {name}"),
+                                Style::default()
+                                    .fg(theme().purple)
+                                    .add_modifier(Modifier::BOLD),
+                            )),
+                            Cell::from(""),
+                            Cell::from(""),
+                            Cell::from(""),
+                            Cell::from(""),
+                            Cell::from(""),
+                            Cell::from(""),
+                        ])
+                    }
+                }
                 ProjectEntry::Item(proj_idx) => {
                     let p = &app.projects[*proj_idx];
                     let meta = app.meta_cache.get(&p.repo);
                     let active = app.active_project_idx == Some(*proj_idx);
-
-                    // repo — active project shows bullet, others show folder icon
                     let repo_display = p.repo.split('/').last().unwrap_or(&p.repo);
                     let repo_text = if active {
                         format!("{I_BULLET} {repo_display}")
@@ -1787,140 +2190,164 @@ fn draw_projects(frame: &mut Frame, app: &App) {
                     let repo_cell = Cell::from(Span::styled(
                         repo_text,
                         if active {
-                            Style::default().fg(theme().accent).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(theme().accent)
+                                .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default()
                         },
                     ));
-
-                    // lang
-                    let lang = meta
-                        .and_then(|m| m.language.as_deref())
-                        .map(lang_short)
-                        .unwrap_or("");
-                    let lang_cell =
-                        Cell::from(Span::styled(lang.to_string(), Style::default().fg(theme().purple)));
-
-                    // branch
-                    let branch_display = if p.branch.len() > 10 {
-                        format!("{}~", &p.branch[..9])
+                    let branch_display = if p.branch.len() > 12 {
+                        format!("{}~", &p.branch[..11])
                     } else {
                         p.branch.clone()
                     };
-                    let branch_cell = Cell::from(Span::styled(
-                        format!("{I_BRANCH} {branch_display}"),
-                        Style::default().fg(theme().fg_dim),
-                    ));
+                    let changes = changes_line(p);
 
-                    // changes — multi-colored spans in one cell
-                    let mut change_spans: Vec<Span> = vec![];
-                    if p.dirty_count > 0 {
-                        change_spans.push(Span::styled(
-                            format!("●{}", p.dirty_count),
-                            Style::default().fg(theme().yellow),
+                    if compact {
+                        let mut state_spans = changes.spans;
+                        state_spans.push(Span::styled(
+                            format!("  {I_BRANCH} {branch_display}"),
+                            Style::default().fg(theme().fg_dim),
                         ));
-                    }
-                    if p.commits_ahead > 0 {
-                        if !change_spans.is_empty() {
-                            change_spans.push(Span::raw(" "));
-                        }
-                        change_spans.push(Span::styled(
-                            format!("↑{}", p.commits_ahead),
-                            Style::default().fg(theme().purple),
-                        ));
-                    }
-                    if p.commits_behind > 0 {
-                        if !change_spans.is_empty() {
-                            change_spans.push(Span::raw(" "));
-                        }
-                        change_spans.push(Span::styled(
-                            format!("↓{}", p.commits_behind),
-                            Style::default().fg(theme().red),
-                        ));
-                    }
-                    let changes_cell = Cell::from(Line::from(change_spans));
-
-                    // ready
-                    let ready_text = if p.template_count > 0 {
-                        format!("t{}", p.template_count)
+                        Row::new(vec![repo_cell, Cell::from(Line::from(state_spans))])
+                    } else if standard {
+                        let issues = match meta.and_then(|m| m.open_issues) {
+                            Some(n) if n > 0 => Cell::from(Span::styled(
+                                n.to_string(),
+                                Style::default().fg(theme().red),
+                            )),
+                            _ => {
+                                Cell::from(Span::styled("0", Style::default().fg(theme().fg_xdim)))
+                            }
+                        };
+                        Row::new(vec![
+                            repo_cell,
+                            Cell::from(Span::styled(
+                                format!("{}/5", agent_coverage_count(p)),
+                                Style::default().fg(theme().purple),
+                            )),
+                            Cell::from(Span::styled(
+                                format!("{I_BRANCH} {branch_display}"),
+                                Style::default().fg(theme().fg_dim),
+                            )),
+                            Cell::from(changes),
+                            issues,
+                        ])
                     } else {
-                        format!(
-                            "{}/{}",
-                            p.recommended_ok, p.recommended_total
-                        )
-                    };
-                    let ready_style = if p.template_count > 0 {
-                        Style::default().fg(theme().yellow)
-                    } else if p.recommended_ok == p.recommended_total {
-                        Style::default().fg(theme().green)
-                    } else {
-                        Style::default().fg(theme().yellow)
-                    };
-                    let pm_cell = Cell::from(Span::styled(ready_text, ready_style));
-
-                    // iss
-                    let iss_cell = match meta.and_then(|m| m.open_issues) {
-                        Some(n) if n > 0 => Cell::from(Span::styled(
-                            format!("{n}"),
-                            Style::default().fg(theme().red),
-                        )),
-                        _ => Cell::from(Span::styled("0", Style::default().fg(theme().fg_xdim))),
-                    };
-
-                    // pushed
-                    let pushed = meta
-                        .and_then(|m| m.pushed_at.as_deref())
-                        .map(relative_date)
-                        .unwrap_or_default();
-                    let pushed_cell =
-                        Cell::from(Span::styled(pushed, Style::default().fg(theme().fg_xdim)));
-
-                    Row::new(vec![
-                        repo_cell,
-                        lang_cell,
-                        branch_cell,
-                        changes_cell,
-                        pm_cell,
-                        iss_cell,
-                        pushed_cell,
-                    ])
+                        let lang = meta
+                            .and_then(|m| m.language.as_deref())
+                            .map(lang_short)
+                            .unwrap_or("");
+                        let issues = match meta.and_then(|m| m.open_issues) {
+                            Some(n) if n > 0 => Cell::from(Span::styled(
+                                n.to_string(),
+                                Style::default().fg(theme().red),
+                            )),
+                            _ => {
+                                Cell::from(Span::styled("0", Style::default().fg(theme().fg_xdim)))
+                            }
+                        };
+                        let pushed = meta
+                            .and_then(|m| m.pushed_at.as_deref())
+                            .map(relative_date)
+                            .unwrap_or_default();
+                        Row::new(vec![
+                            repo_cell,
+                            Cell::from(Span::styled(
+                                lang.to_string(),
+                                Style::default().fg(theme().purple),
+                            )),
+                            Cell::from(Line::from(agent_pill_spans(p, !show_preview))),
+                            Cell::from(Span::styled(
+                                format!("{I_BRANCH} {branch_display}"),
+                                Style::default().fg(theme().fg_dim),
+                            )),
+                            Cell::from(changes),
+                            issues,
+                            Cell::from(Span::styled(pushed, Style::default().fg(theme().fg_xdim))),
+                        ])
+                    }
                 }
             })
             .collect();
 
-        let header = Row::new(vec![
-            Cell::from("repo"),
-            Cell::from("lang"),
-            Cell::from("branch"),
-            Cell::from("changes"),
-            Cell::from("ready"),
-            Cell::from("iss"),
-            Cell::from("pushed"),
-        ])
-        .style(Style::default().fg(theme().fg_xdim))
-        .bottom_margin(0);
+        let (header, widths) = if compact {
+            (
+                Row::new(vec![Cell::from("repo"), Cell::from("state")])
+                    .style(Style::default().fg(theme().fg_xdim)),
+                vec![Constraint::Min(18), Constraint::Length(24)],
+            )
+        } else if standard {
+            (
+                Row::new(vec![
+                    Cell::from("repo"),
+                    Cell::from("agents"),
+                    Cell::from("branch"),
+                    Cell::from("changes"),
+                    Cell::from("issues"),
+                ])
+                .style(Style::default().fg(theme().fg_xdim)),
+                vec![
+                    Constraint::Min(18),
+                    Constraint::Length(6),
+                    Constraint::Length(14),
+                    Constraint::Length(11),
+                    Constraint::Length(6),
+                ],
+            )
+        } else {
+            (
+                Row::new(vec![
+                    Cell::from("repo"),
+                    Cell::from("lang"),
+                    Cell::from("agents"),
+                    Cell::from("branch"),
+                    Cell::from("changes"),
+                    Cell::from("issues"),
+                    Cell::from("pushed"),
+                ])
+                .style(Style::default().fg(theme().fg_xdim)),
+                vec![
+                    Constraint::Min(18),
+                    Constraint::Length(4),
+                    Constraint::Length(if show_preview { 26 } else { 20 }),
+                    Constraint::Length(14),
+                    Constraint::Length(11),
+                    Constraint::Length(6),
+                    Constraint::Length(6),
+                ],
+            )
+        };
 
-        let widths = [
-            Constraint::Min(16),    // repo — takes remaining space
-            Constraint::Length(4),  // lang
-            Constraint::Length(12), // branch (icon + space + name)
-            Constraint::Length(11), // changes
-            Constraint::Length(7),  // ready
-            Constraint::Length(4),  // iss
-            Constraint::Length(5),  // pushed
-        ];
+        let title = if compact {
+            " projects  essentials "
+        } else if standard {
+            " projects  agents: Cl Cx Pi Ge MCP shown as coverage count "
+        } else {
+            " projects  agents: Cl Claude  Cx Codex  Pi Pi  Ge Gemini  MCP servers "
+        };
 
         let mut ts = app.project_list_state.clone();
         frame.render_stateful_widget(
             Table::new(rows, widths)
                 .header(header)
-                .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" projects "))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .title(title),
+                )
                 .row_highlight_style(hl())
                 .highlight_symbol("> ")
                 .column_spacing(2),
-            outer[1],
+            main[0],
             &mut ts,
         );
+
+        if show_preview {
+            draw_project_preview(frame, app, main[1]);
+        }
     }
 
     let footer_line = if let Some(msg) = &app.projects_msg {
@@ -1960,7 +2387,7 @@ fn draw_projects(frame: &mut Frame, app: &App) {
             ("q", "quit"),
         ])
     };
-    frame.render_widget(Paragraph::new(footer_line), outer[2]);
+    frame.render_widget(Paragraph::new(footer_line), outer[3]);
 }
 
 fn handle_memories(app: &mut App, key: KeyCode) -> bool {
@@ -2176,7 +2603,7 @@ fn draw_setup(frame: &mut Frame, app: &App) {
                         Style::default().fg(theme().fg_dim),
                     )),
                 ])
-                .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" initialize ")),
+                .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).title(" context files ")),
                 inner[0],
             );
         }
@@ -2630,10 +3057,10 @@ fn draw_agents(frame: &mut Frame, app: &App) {
                             Span::raw(skill.source.clone()),
                         ]),
                         Line::from(""),
-                        Line::from(Span::raw(if skill.description.is_empty() {
+                        Line::from(Span::raw(if skill.content.is_empty() {
                             "No description found.".to_string()
                         } else {
-                            skill.description.clone()
+                            skill.content.clone()
                         })),
                     ]
                 })

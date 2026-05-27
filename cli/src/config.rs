@@ -8,36 +8,60 @@ use ratatui::style::Color;
 
 #[derive(Clone, serde::Deserialize)]
 pub(crate) struct ThemeConfig {
-    #[serde(default = "default_accent")]  pub(crate) accent:  String,
-    #[serde(default = "default_sel_fg")]  pub(crate) sel_fg:  String,
-    #[serde(default = "default_fg_dim")]  pub(crate) fg_dim:  String,
-    #[serde(default = "default_fg_xdim")] pub(crate) fg_xdim: String,
-    #[serde(default = "default_green")]   pub(crate) green:   String,
-    #[serde(default = "default_red")]     pub(crate) red:     String,
-    #[serde(default = "default_yellow")]  pub(crate) yellow:  String,
-    #[serde(default = "default_purple")]  pub(crate) purple:  String,
+    #[serde(default = "default_accent")]
+    pub(crate) accent: String,
+    #[serde(default = "default_sel_fg")]
+    pub(crate) sel_fg: String,
+    #[serde(default = "default_fg_dim")]
+    pub(crate) fg_dim: String,
+    #[serde(default = "default_fg_xdim")]
+    pub(crate) fg_xdim: String,
+    #[serde(default = "default_green")]
+    pub(crate) green: String,
+    #[serde(default = "default_red")]
+    pub(crate) red: String,
+    #[serde(default = "default_yellow")]
+    pub(crate) yellow: String,
+    #[serde(default = "default_purple")]
+    pub(crate) purple: String,
 }
 
-fn default_accent()  -> String { "#e8b887".into() }
-fn default_sel_fg()  -> String { "#101010".into() }
-fn default_fg_dim()  -> String { "#A0A0A0".into() }
-fn default_fg_xdim() -> String { "#7E7E7E".into() }
-fn default_green()   -> String { "#90b99f".into() }
-fn default_red()     -> String { "#f5a191".into() }
-fn default_yellow()  -> String { "#e6b99d".into() }
-fn default_purple()  -> String { "#aca1cf".into() }
+fn default_accent() -> String {
+    "#e8b887".into()
+}
+fn default_sel_fg() -> String {
+    "#101010".into()
+}
+fn default_fg_dim() -> String {
+    "#A0A0A0".into()
+}
+fn default_fg_xdim() -> String {
+    "#7E7E7E".into()
+}
+fn default_green() -> String {
+    "#90b99f".into()
+}
+fn default_red() -> String {
+    "#f5a191".into()
+}
+fn default_yellow() -> String {
+    "#e6b99d".into()
+}
+fn default_purple() -> String {
+    "#aca1cf".into()
+}
 
 impl Default for ThemeConfig {
     fn default() -> Self {
         Self {
-            accent:  default_accent(),
-            sel_fg:  default_sel_fg(),
-            fg_dim:  default_fg_dim(),
+            accent: default_accent(),
+            sel_fg: default_sel_fg(),
+            fg_dim: default_fg_dim(),
             fg_xdim: default_fg_xdim(),
-            green:   default_green(),
-            red:     default_red(),
-            yellow:  default_yellow(),
-            purple:  default_purple(),
+            green: default_green(),
+            red: default_red(),
+            yellow: default_yellow(),
+            purple: default_purple(),
         }
     }
 }
@@ -72,22 +96,28 @@ pub(crate) fn theme() -> Theme {
 
 pub(crate) fn set_theme(cfg: &ThemeConfig) {
     let t = Theme {
-        accent:  hex_color(&cfg.accent),
-        sel_fg:  hex_color(&cfg.sel_fg),
-        fg_dim:  hex_color(&cfg.fg_dim),
+        accent: hex_color(&cfg.accent),
+        sel_fg: hex_color(&cfg.sel_fg),
+        fg_dim: hex_color(&cfg.fg_dim),
         fg_xdim: hex_color(&cfg.fg_xdim),
-        green:   hex_color(&cfg.green),
-        red:     hex_color(&cfg.red),
-        yellow:  hex_color(&cfg.yellow),
-        purple:  hex_color(&cfg.purple),
+        green: hex_color(&cfg.green),
+        red: hex_color(&cfg.red),
+        yellow: hex_color(&cfg.yellow),
+        purple: hex_color(&cfg.purple),
     };
     THEME.with(|c| c.set(Some(t)));
 }
 
 pub(crate) fn reload_theme_if_changed(mtime: &mut Option<SystemTime>) {
-    let Some(path) = dirs_home().map(|h| h.join(".project-index.toml")) else { return };
-    let Ok(meta) = fs::metadata(&path) else { return };
-    let Ok(modified) = meta.modified() else { return };
+    let Some(path) = dirs_home().map(|h| h.join(".project-index.toml")) else {
+        return;
+    };
+    let Ok(meta) = fs::metadata(&path) else {
+        return;
+    };
+    let Ok(modified) = meta.modified() else {
+        return;
+    };
     if mtime.map_or(true, |last| modified > last) {
         *mtime = Some(modified);
         if let Ok(s) = fs::read_to_string(&path) {

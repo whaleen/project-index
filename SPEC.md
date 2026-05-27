@@ -41,10 +41,17 @@ See `docs/adr/0001-read-only-work-index.md`.
 
 ## GitHub Surface
 
+project-index should become a read-only terminal mirror of the essential GitHub repository surfaces normally checked in the browser, while preserving the observer-only contract.
+
 - ✅ Read GitHub description, homepage, repo URL, topics, stars/forks/license/open PR counts through `gh`
 - ✅ Read open issues through `gh`
 - 📋 Clear degraded state when `gh` is unavailable or unauthenticated
 - 📋 Read-only issue detail and issue search/filter
+- 📋 Read open pull requests with status/check summaries and changed-file previews
+- 📋 Read GitHub Actions workflow/run status
+- 📋 Read releases, tags, labels, milestones, default branch, and repository metadata
+- 📋 Copy/open GitHub URLs without mutating GitHub state
+- ❌ Creating, editing, closing, merging, labeling, assigning, dispatching, or otherwise mutating GitHub resources
 
 ## Context Surface
 
