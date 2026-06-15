@@ -15,6 +15,9 @@
 - Agents tab consolidates MCP, skills, and sessions
   - Sessions discovered from native storage for Claude, Codex, Gemini, and Pi
   - Inline session summary for Claude and Pi JSONL sessions
+- Tauri desktop companion now includes project Memories and Agents tabs:
+  - Memories previews native Claude/Codex/Gemini/Pi memory/config files
+  - Agents inventories project-local skills, `.mcp.json` servers, and native agent sessions
 - MCP server: `px mcp serve` exposes read-only inspection tools
 - Source split into focused modules: config, project, github, agent, skills, cli, lib
 
@@ -28,8 +31,10 @@
 
 ## What's Next
 
-1. Global agent view: surface `~/.claude`, `~/.codex`, `~/.gemini`, `~/.pi/agent`, `~/.agents` as a system-level tab
-2. Improve sessions: cross-project view, faster Codex scan, Gemini summaries
-3. Grok Build support (see issue #4)
-4. Per-provider config/settings observation (see `provider-table.md` for planned locations)
-5. Skills surface: per-agent skill dirs beyond shared `~/.agents/skills/`
+1. Tauri desktop companion: continue using `app/` as the rich UI discovery surface while preserving read-only behavior
+2. Agent inbox observation: refine the cross-project inbox dashboard, record detail view, filters, and copyable agent prompts
+3. Global agent view: surface `~/.claude`, `~/.codex`, `~/.gemini`, `~/.pi/agent`, `~/.agents` as a system-level tab
+4. Improve sessions: cross-project view, faster Codex scan, Gemini summaries
+5. Grok Build support (see issue #4)
+6. Per-provider config/settings observation (see `provider-table.md` for planned locations)
+7. Improve desktop Agents/Memories tabs with session detail summaries and global agent inventory

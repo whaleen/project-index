@@ -9,13 +9,15 @@ It is deliberately **observer-first and read-only**. Do not add scaffolding, set
 Read first:
 
 1. `docs/adr/0001-read-only-work-index.md`
-2. `SPEC.md`
-3. `docs/status.md`
+2. `docs/adr/0002-tauri-desktop-companion.md`
+3. `SPEC.md`
+4. `docs/status.md`
 
 ## Stack
 
 - **Language**: Rust stable
 - **TUI**: Ratatui 0.29 + Crossterm 0.28
+- **Desktop companion**: Tauri v2 + React + TypeScript + Tailwind/shadcn-style UI under `app/`
 - **External tools**: `git`, `gh` CLI, optional `chafa`, optional `$EDITOR` for legacy paths
 - **Config**: `~/.project-index.toml` for projects root + theme
 - **Runtime cache**: `~/.project-index/` for observation cache such as avatars/GitHub metadata
@@ -26,6 +28,10 @@ Read first:
 cd cli
 cargo run --bin px           # dev build
 cargo install --path .       # install ~/.cargo/bin/px
+
+cd ../app
+pnpm install                 # desktop companion deps
+pnpm tauri dev               # rich UI discovery surface
 ```
 
 Prerequisites: Rust stable, `gh` CLI authenticated for GitHub data, Nerd Font terminal.
@@ -44,10 +50,10 @@ Important reader areas:
 
 ## Product Rules
 
-- Do not write project files from project-index UI/CLI/MCP.
+- Do not write project files from project-index UI/CLI/MCP/app.
 - Do not create or maintain project-local `.project-index/`, `.memory/`, or `.prompts/` state.
 - Do not add prompt management.
-- Do not install/repair/remove MCP servers or skills.
+- Do not install/repair/remove MCP servers, skills, or agent-inbox files.
 - `SPEC.md` is a contract artifact that project-index observes; enforcement belongs in an agent skill/workflow.
 - Prefer native agent storage readers over project-index-owned registries.
 

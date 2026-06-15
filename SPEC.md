@@ -8,7 +8,7 @@ project-index is a read-only work index for humans and agents. It gives one term
 
 project-index is not a scaffold tool, setup wizard, prompt manager, memory manager, or agent configuration writer.
 
-See `docs/adr/0001-read-only-work-index.md`.
+See `docs/adr/0001-read-only-work-index.md` and `docs/adr/0002-tauri-desktop-companion.md`.
 
 ## Non-Negotiable Constraints
 
@@ -19,6 +19,13 @@ See `docs/adr/0001-read-only-work-index.md`.
 - ✅ No project-index-owned project state as source of truth
 - ✅ Observe `SPEC.md`; do not enforce or maintain it from project-index
 - ✅ MCP/CLI surfaces are inspection-only
+
+## Product Surfaces
+
+- ✅ `px` CLI/TUI/MCP remains the fast terminal and agent-facing inspection surface
+- 📋 Tauri desktop companion under `app/` for rich local project/agent dashboard iteration
+- 📋 Use the desktop companion to refine information architecture before porting proven views back to the Ratatui TUI
+- ❌ Desktop app install/repair/scaffold/mutation flows without a new ADR and explicit contract change
 
 ## Observed Project Index
 
@@ -46,6 +53,7 @@ project-index should become a read-only terminal mirror of the essential GitHub 
 - ✅ Read GitHub description, homepage, repo URL, topics, stars/forks/license/open PR counts through `gh`
 - ✅ Read open issues through `gh`
 - 📋 Clear degraded state when `gh` is unavailable or unauthenticated
+- ✅ Read-only issue list in desktop dashboard/project surfaces
 - 📋 Read-only issue detail and issue search/filter
 - 📋 Read open pull requests with status/check summaries and changed-file previews
 - 📋 Read GitHub Actions workflow/run status
@@ -65,6 +73,7 @@ Observe, never create or repair:
 - 📋 `docs/`
 - 📋 `.pi/settings.json`, `.pi/agents/`, `.pi/chains/`
 - 📋 `.agents/skills/`, `skills-lock.json`
+- 📋 `.agent/inbox/README.md`, `.agent/inbox/schema.md`, `.agent/inbox/feedback.jsonl`
 - 📋 stale/legacy markers such as `.pemguin/`, `.memory/`, `.prompts/`, `.cntx/`
 
 ## Agent Sessions Surface
@@ -109,11 +118,24 @@ These behaviors are intentionally out of scope and should be removed when encoun
 - ❌ MCP install/repair/edit/delete flows
 - ❌ template scaffolding for project docs/context
 
+## Agent Inbox Surface
+
+project-index observes local agent inbox installations as workflow state. Installation and mutation belong to the separate `agent-inbox` package/skill, not project-index.
+
+- 📋 Detect `.agent/inbox/` per project
+- 📋 Summarize active record counts by status: `new`, `planned`, `accepted`, `in_progress`, `done`, `wontfix`
+- 📋 Read active records from `.agent/inbox/feedback.jsonl` when present
+- 📋 Surface missing inbox docs/schema as observation-only project health
+- 📋 Show copyable prompts or install commands without executing them
+- ❌ Creating, editing, deleting, planning, accepting, or marking inbox records from project-index
+- ❌ Installing agent-inbox into projects from project-index without a new ADR/contract change
+
 ## Architecture Contract
 
 - ✅ Split `cli/src/lib.rs` by concern: config, project scan, agent readers, git/GitHub readers, app state, tab renderers, key handlers, CLI/MCP.
+- 📋 Add reusable read-only core boundary shared by `cli/` and `app/`
 - 📋 Keep native agent storage docs current under `docs/agents/`.
-- 📋 Add regression checks for read-only behavior: no UI/CLI/MCP path should write project files.
+- 📋 Add regression checks for read-only behavior: no UI/CLI/MCP/app path should write project files.
 
 ## Known Issues
 

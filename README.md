@@ -1,8 +1,10 @@
 # project-index
 
-One terminal surface for observing everything an AI-assisted dev workflow touches — projects, git state, agent sessions, memories, skills, and MCP config. Read-only and observer-first.
+One local dashboard for observing everything an AI-assisted dev workflow touches — projects, git state, GitHub issues/repo metadata, agent inbox records, sessions, memories, skills, MCP config, and reusable agent library assets. Read-only and observer-first.
 
-`px` is a Ratatui TUI built in Rust. It reads from where git and agents naturally store things (native `~/.claude`, `~/.codex`, `~/.gemini`, `~/.pi` storage) and never writes project files.
+`px` started as a Ratatui TUI built in Rust. It reads from where git and agents naturally store things (native `~/.claude`, `~/.codex`, `~/.gemini`, `~/.pi` storage) and never writes project files.
+
+The repo now also includes a Tauri desktop companion under `app/`. The desktop app is the rich UI discovery surface for project-index: project cards sorted by latest commit, per-project dashboards, GitHub/OpenGraph cards, Agent Inbox views, Memories/Agents tabs, and a separate Agent Library page. It follows the same observer-first contract: rich local dashboard, no project mutation.
 
 ## Install
 
@@ -31,7 +33,34 @@ px
 
 Navigate with `↑↓` or `jk`. `enter` opens a project. `esc` goes back. `q` quits.
 
-## Tabs
+## Desktop companion
+
+```bash
+cd app
+pnpm install
+pnpm tauri dev
+
+# production validation
+pnpm build
+cd src-tauri && cargo check
+```
+
+The desktop companion is the rich UI discovery surface for project-index. Use it to iterate on project dashboards, context health, agent sessions, skills/MCP, GitHub issue/repo views, Agent Inbox observations, and Agent Library inventory before porting proven views back to the TUI.
+
+Desktop pages:
+
+| Page | What it shows |
+|------|---------------|
+| Dashboard | Detailed project cards sorted by latest commit, plus cross-project Agent Inbox and GitHub issue tabs |
+| Agent Library | Unified prompts, recipes, and skills from `/Users/josh/Projects/_whaleen/agent-library` |
+| Project Overview | Repo/app identity, GitHub OpenGraph card, README, suggested actions, git health, Agent Inbox and GitHub summaries |
+| Project Agent Inbox | Read-only inbox records with copyable planning/implementation prompts |
+| Project Context | Observed context files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.mcp.json`) |
+| Project Memories | Native Claude/Codex/Gemini/Pi memory/config file previews |
+| Project Agents | Project-local skills, `.mcp.json` servers, and native agent sessions |
+| Project GitHub | GitHub repo metadata and open issues |
+
+## TUI tabs
 
 | Key | Tab | What it shows |
 |-----|-----|---------------|
@@ -85,7 +114,7 @@ purple  = "#aca1cf"
 
 Each root is scanned 2 levels deep for `.git` directories. Set `PROJECT_INDEX_PROJECTS_DIR` to override via env (single path).
 
-`~/.project-index/` holds observation cache (GitHub metadata, avatars).
+`~/.project-index/` holds observation cache (GitHub issues, GitHub repo metadata/OpenGraph data, avatars).
 
 ## MCP server
 
@@ -126,6 +155,7 @@ The workflow builds binaries for `aarch64-apple-darwin` and `x86_64-apple-darwin
 ```
 project-index/
   cli/              Rust source (bin: px)
+  app/              Tauri + React desktop companion
   docs/adr/         architecture decisions
   docs/agents/      native agent storage docs
   .github/workflows/release.yml
