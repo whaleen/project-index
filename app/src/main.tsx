@@ -160,6 +160,20 @@ type ProjectVisuals = {
   local_icon_url: string | null;
 };
 
+type AdrRecord = {
+  title: string;
+  path: string;
+  modified_epoch: number | null;
+};
+
+type DocumentationSummary = {
+  docs_present: boolean;
+  adr_present: boolean;
+  adr_count: number;
+  latest_adr: AdrRecord | null;
+  adr_records: AdrRecord[];
+};
+
 type LocalFreshness = {
   observed_at: number;
   source: string;
@@ -172,6 +186,7 @@ type ProjectObservation = {
   inbox: InboxSummary;
   github_issues: GitHubIssueSummary;
   visuals: ProjectVisuals;
+  docs: DocumentationSummary;
   readme: string | null;
   latest_commit_epoch: number | null;
   latest_commit: string | null;
@@ -483,16 +498,39 @@ function DashboardProjectGrid({ projects, issueCountsByPath, onSelect }: { proje
 
 function ContextPanel({ project }: { project: ProjectObservation }) {
   return (
-    <ShellCard title="Context health" description="Read-only project context observations" icon={<Radar className="size-4" />}>
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {project.context_files.map((item) => (
-          <div key={item.path} className="flex min-w-0 items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-            {item.present ? <CheckCircle2 className="size-4 text-chart-3" /> : <CircleAlert className="size-4 text-chart-4" />}
-            <span className="truncate">{item.path}</span>
+    <div className="grid gap-4 lg:grid-cols-2">
+      <ShellCard title="Context health" description="Read-only project context observations" icon={<Radar className="size-4" />} className="lg:col-span-2">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {project.context_files.map((item) => (
+            <div key={item.path} className="flex min-w-0 items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+              {item.present ? <CheckCircle2 className="size-4 text-chart-3" /> : <CircleAlert className="size-4 text-chart-4" />}
+              <span className="truncate">{item.path}</span>
+            </div>
+          ))}
+        </div>
+      </ShellCard>
+      <ShellCard title="Documentation" description="docs/ and architecture decision records" icon={<MessageSquareText className="size-4" />} className="lg:col-span-2">
+        <div className="mb-4 grid gap-2 sm:grid-cols-3">
+          <StatCard label="docs/" value={project.docs.docs_present ? "present" : "missing"} />
+          <StatCard label="docs/adr/" value={project.docs.adr_present ? "present" : "missing"} />
+          <StatCard label="ADRs" value={project.docs.adr_count} />
+        </div>
+        {project.docs.latest_adr ? <p className="mb-3 text-sm text-muted-foreground">Latest ADR: <span className="text-foreground">{project.docs.latest_adr.title}</span></p> : null}
+        {project.docs.adr_records.length ? (
+          <div className="space-y-2">
+            {project.docs.adr_records.slice(0, 8).map((adr) => (
+              <div key={adr.path} className="flex min-w-0 items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{adr.title}</div>
+                  <code className="block truncate text-xs text-muted-foreground">{adr.path}</code>
+                </div>
+                {adr.modified_epoch ? <Badge variant="outline">{fmtEpoch(adr.modified_epoch)}</Badge> : null}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-    </ShellCard>
+        ) : <EmptyState>No ADR markdown files observed in docs/adr.</EmptyState>}
+      </ShellCard>
+    </div>
   );
 }
 

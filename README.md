@@ -59,7 +59,7 @@ Desktop pages:
 | Agent Library | Unified prompts, recipes, and skills from `/Users/josh/Projects/_whaleen/agent-library` |
 | Project Overview | Repo/app identity, GitHub OpenGraph card, README, suggested actions, git health, Agent Inbox and GitHub summaries |
 | Project Agent Inbox | Read-only inbox records with copyable planning/implementation prompts |
-| Project Context | Observed context files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.mcp.json`) |
+| Project Context | Observed context files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.mcp.json`, `docs/`, `docs/adr/`) |
 | Project Memories | Native Claude/Codex/Gemini/Pi memory/config file previews |
 | Project Agents | Project-local skills, `.mcp.json` servers, and native agent sessions |
 | Project GitHub | GitHub repo metadata and open issues |

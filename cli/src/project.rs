@@ -136,6 +136,8 @@ pub(crate) fn scan_setup_unfiltered(path: &Path) -> Vec<SetupItem> {
         let p = path.join("GEMINI.md");
         p.is_symlink() || p.exists()
     };
+    let docs_ok = path.join("docs").exists();
+    let adr_ok = path.join("docs").join("adr").exists();
     let mcp_ok = path.join(".mcp.json").exists();
 
     vec![
@@ -188,6 +190,30 @@ pub(crate) fn scan_setup_unfiltered(path: &Path) -> Vec<SetupItem> {
             gitignored: false,
         },
         SetupItem {
+            label: "docs/",
+            detail: "project documentation directory".to_string(),
+            category: SetupCategory::Recommended,
+            status: if docs_ok {
+                SetupStatus::Ok
+            } else {
+                SetupStatus::Missing
+            },
+            gitignore_path: None,
+            gitignored: false,
+        },
+        SetupItem {
+            label: "docs/adr/",
+            detail: "architecture decision records".to_string(),
+            category: SetupCategory::Recommended,
+            status: if adr_ok {
+                SetupStatus::Ok
+            } else {
+                SetupStatus::Missing
+            },
+            gitignore_path: None,
+            gitignored: false,
+        },
+        SetupItem {
             label: ".mcp.json",
             detail: "MCP server definitions".to_string(),
             category: SetupCategory::Recommended,
@@ -208,6 +234,8 @@ pub(crate) fn setup_item_edit_path(project_path: &Path, item: &SetupItem) -> Opt
         "CLAUDE.md" => Some(project_path.join("CLAUDE.md")),
         "AGENTS.md" => Some(project_path.join("AGENTS.md")),
         "GEMINI.md" => Some(project_path.join("GEMINI.md")),
+        "docs/" => Some(project_path.join("docs")),
+        "docs/adr/" => Some(project_path.join("docs").join("adr")),
         ".mcp.json" => Some(project_path.join(".mcp.json")),
         _ => None,
     }

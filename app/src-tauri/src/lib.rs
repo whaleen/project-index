@@ -143,6 +143,22 @@ struct ProjectVisuals {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct AdrRecord {
+    title: String,
+    path: String,
+    modified_epoch: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct DocumentationSummary {
+    docs_present: bool,
+    adr_present: bool,
+    adr_count: usize,
+    latest_adr: Option<AdrRecord>,
+    adr_records: Vec<AdrRecord>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct LocalFreshness {
     observed_at: u64,
     source: String,
@@ -156,6 +172,7 @@ struct ProjectObservation {
     inbox: InboxSummary,
     github_issues: GitHubIssueSummary,
     visuals: ProjectVisuals,
+    docs: DocumentationSummary,
     readme: Option<String>,
     latest_commit_epoch: Option<u64>,
     latest_commit: Option<String>,
@@ -696,6 +713,8 @@ fn context_files(path: &Path) -> Vec<ContextFileObservation> {
         "AGENTS.md",
         "CLAUDE.md",
         "GEMINI.md",
+        "docs",
+        "docs/adr",
         ".mcp.json",
         "skills-lock.json",
         ".agents/skills",
@@ -710,6 +729,67 @@ fn context_files(path: &Path) -> Vec<ContextFileObservation> {
         present: path.join(rel).exists(),
     })
     .collect()
+}
+
+fn modified_epoch(path: &Path) -> Option<u64> {
+    path.metadata()
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs())
+}
+
+fn documentation_summary(path: &Path) -> DocumentationSummary {
+    let docs_dir = path.join("docs");
+    let adr_dir = docs_dir.join("adr");
+    let mut adr_records = Vec::new();
+    if let Ok(entries) = fs::read_dir(&adr_dir) {
+        for entry in entries.flatten() {
+            let adr_path = entry.path();
+            if adr_path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+                continue;
+            }
+            let rel = adr_path
+                .strip_prefix(path)
+                .unwrap_or(&adr_path)
+                .display()
+                .to_string();
+            let title = fs::read_to_string(&adr_path)
+                .ok()
+                .and_then(|content| {
+                    content
+                        .lines()
+                        .find(|line| line.starts_with("# "))
+                        .map(|line| line.trim_start_matches("# ").trim().to_string())
+                })
+                .or_else(|| {
+                    adr_path
+                        .file_stem()
+                        .and_then(|name| name.to_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| rel.clone());
+            adr_records.push(AdrRecord {
+                title,
+                path: rel,
+                modified_epoch: modified_epoch(&adr_path),
+            });
+        }
+    }
+    adr_records.sort_by(|a, b| {
+        b.modified_epoch
+            .cmp(&a.modified_epoch)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+    DocumentationSummary {
+        docs_present: docs_dir.exists(),
+        adr_present: adr_dir.exists(),
+        adr_count: adr_records.len(),
+        latest_adr: adr_records.first().cloned(),
+        adr_records,
+    }
 }
 
 fn project_name(path: &Path) -> String {
@@ -2173,6 +2253,7 @@ fn observe_project_with_source(path: &Path, source: &str) -> ProjectObservation 
         inbox: summarize_inbox(path),
         github_issues: summarize_github_issues(path),
         visuals: project_visuals(path),
+        docs: documentation_summary(path),
         readme: read_project_readme(path),
         latest_commit_epoch: git_output(path, &["log", "-1", "--format=%ct"])
             .and_then(|s| s.parse().ok()),
@@ -2316,6 +2397,7 @@ fn watch_repo_local_surfaces(watcher: &mut RecommendedWatcher, repo_path: &Path)
     );
     watch_if_exists(watcher, repo_path.join(".claude"), RecursiveMode::Recursive);
     watch_if_exists(watcher, repo_path.join(".agents"), RecursiveMode::Recursive);
+    watch_if_exists(watcher, repo_path.join("docs"), RecursiveMode::Recursive);
 }
 
 fn start_local_observation_watcher(app_handle: tauri::AppHandle) {

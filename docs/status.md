@@ -7,7 +7,7 @@
 - Opening a project is immediate; Home and Issues hydrate in the background, other tabs load lazily
 - Home shows repo identity, recent commits, GitHub metadata, README, dirty files, and local summary data
 - Issues reads open GitHub issues through `gh`
-- Config tab observes native context files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.mcp.json`)
+- Config/Context surfaces observe native context files plus `docs/` and `docs/adr/` as standard documentation/ADR locations
 - Memories tab reads native agent memory:
   - Claude: `~/.claude/projects/<encoded>/memory/`
   - Codex: `~/.codex/memories/<repo-name>/`

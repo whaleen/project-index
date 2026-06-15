@@ -70,7 +70,8 @@ Observe, never create or repair:
 - ✅ `GEMINI.md`
 - ✅ `.mcp.json`
 - 📋 `SPEC.md`
-- 📋 `docs/`
+- ✅ `docs/`
+- ✅ `docs/adr/` as the standard architecture decision record location
 - 📋 `.pi/settings.json`, `.pi/agents/`, `.pi/chains/`
 - 📋 `.agents/skills/`, `skills-lock.json`
 - 📋 `.agent/inbox/README.md`, `.agent/inbox/schema.md`, `.agent/inbox/feedback.jsonl`
