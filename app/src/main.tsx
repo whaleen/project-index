@@ -120,6 +120,8 @@ type LocalObservationEvent = {
   reason: string;
   observed_at: number;
   paths: string[];
+  project_paths: string[];
+  needs_full_rescan: boolean;
 };
 
 function fmtEpoch(epochSecs: number): string {
@@ -999,12 +1001,33 @@ function App() {
     return () => window.clearInterval(interval);
   }, [refreshLocalOverview]);
 
+  const refreshObservedProjects = React.useCallback((paths: string[]) => {
+    const uniquePaths = [...new Set(paths)].slice(0, 6);
+    if (uniquePaths.length === 0) return;
+    for (const path of uniquePaths) {
+      invoke<ProjectObservation>("inspect_project", { path })
+        .then((project) => {
+          setOverview((prev) => prev ? {
+            ...prev,
+            projects: prev.projects.map((item) => item.path === project.path ? project : item)
+              .sort((a, b) => (b.latest_commit_epoch ?? 0) - (a.latest_commit_epoch ?? 0)),
+          } : prev);
+        })
+        .catch(() => {});
+    }
+  }, []);
+
   React.useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     listen<LocalObservationEvent>("observation://local-changed", (event) => {
       setLastLocalObservationAt(event.payload.observed_at);
-      if (document.visibilityState === "visible") refreshLocalOverview(false);
+      if (document.visibilityState !== "visible") return;
+      if (event.payload.needs_full_rescan || event.payload.project_paths.length > 6) {
+        refreshLocalOverview(false);
+      } else {
+        refreshObservedProjects(event.payload.project_paths);
+      }
     }).then((dispose) => {
       if (cancelled) dispose();
       else unlisten = dispose;
@@ -1013,7 +1036,7 @@ function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, [refreshLocalOverview]);
+  }, [refreshLocalOverview, refreshObservedProjects]);
 
   // When navigating to a project, load cached GitHub data (no live call) if not yet loaded.
   React.useEffect(() => {

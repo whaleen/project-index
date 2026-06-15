@@ -228,6 +228,8 @@ struct LocalObservationEvent {
     reason: String,
     observed_at: u64,
     paths: Vec<String>,
+    project_paths: Vec<String>,
+    needs_full_rescan: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -1847,6 +1849,7 @@ fn start_local_observation_watcher(app_handle: tauri::AppHandle) {
     thread::spawn(move || {
         let root = default_projects_root();
         let repo_paths = scan_git_repos(&root);
+        let repo_paths_for_events = repo_paths.clone();
         let (tx, rx) = mpsc::channel();
         let Ok(mut watcher) = RecommendedWatcher::new(
             move |result| {
@@ -1899,7 +1902,23 @@ fn start_local_observation_watcher(app_handle: tauri::AppHandle) {
                             .map(|instant| instant.elapsed() >= Duration::from_millis(750))
                             .unwrap_or(false)
                     {
-                        let paths = pending_paths.iter().take(25).cloned().collect();
+                        let paths: Vec<String> = pending_paths.iter().take(25).cloned().collect();
+                        let mut project_paths = BTreeSet::new();
+                        let mut needs_full_rescan = false;
+                        for changed_path in &pending_paths {
+                            let path = PathBuf::from(changed_path);
+                            let mut matched = false;
+                            for repo_path in &repo_paths_for_events {
+                                if path.starts_with(repo_path) {
+                                    project_paths.insert(repo_path.display().to_string());
+                                    matched = true;
+                                    break;
+                                }
+                            }
+                            if !matched {
+                                needs_full_rescan = true;
+                            }
+                        }
                         pending_paths.clear();
                         let _ = tauri::Emitter::emit(
                             &app_handle,
@@ -1908,6 +1927,8 @@ fn start_local_observation_watcher(app_handle: tauri::AppHandle) {
                                 reason: "filesystem".to_string(),
                                 observed_at: now_epoch_secs(),
                                 paths,
+                                project_paths: project_paths.into_iter().collect(),
+                                needs_full_rescan,
                             },
                         );
                     }

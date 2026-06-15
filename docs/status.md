@@ -27,11 +27,11 @@
 - Nerd Font glyphs have no fallback
 - Codex session scan walks all historical session dirs on each project load
 - Gemini summary viewer not yet implemented
-- Desktop local refresh now has a lightweight filesystem watcher and 60s polling fallback, but it still uses frontend-triggered rescans rather than a backend observation store with per-resource snapshots
+- Desktop local refresh now has a lightweight filesystem watcher, targeted project refreshes, and 60s polling fallback, but it still lacks a backend observation store with per-resource snapshots
 
 ## What's Next
 
-1. Continue ADR 0003: add backend-owned observation store with per-resource snapshots and bounded local refresh queues. GitHub cached inspection, freshness metadata, manual refresh buttons, serialized remote calls, lightweight local watcher events, and frontend local-refresh coalescing are in place.
+1. Continue ADR 0003: add backend-owned observation store with per-resource snapshots and bounded local refresh queues. GitHub cached inspection, freshness metadata, manual refresh buttons, serialized remote calls, lightweight local watcher events, targeted project refreshes, and frontend local-refresh coalescing are in place.
 2. Agent inbox observation: refine the cross-project inbox dashboard, record detail view, filters, and copyable agent prompts
 3. Global agent view: surface `~/.claude`, `~/.codex`, `~/.gemini`, `~/.pi/agent`, `~/.agents` as a system-level tab
 4. Improve sessions: cross-project view, faster Codex scan, Gemini summaries
