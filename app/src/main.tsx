@@ -244,6 +244,20 @@ type StorageOverview = {
   observations: number;
   github_repos: number;
   github_issues: number;
+  activity_events: number;
+};
+
+type ObservationActivityRecord = {
+  id: number;
+  occurred_at: number;
+  source: string;
+  resource_key: string;
+  resource_type: string;
+  project_path: string | null;
+  action: string;
+  status: string;
+  message: string | null;
+  detail_json: string | null;
 };
 
 type AppOverview = {
@@ -939,6 +953,33 @@ function EmptyState({ children }: React.PropsWithChildren) {
   return <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">{children}</div>;
 }
 
+function ActivityPanel({ records }: { records: ObservationActivityRecord[] }) {
+  if (records.length === 0) return <EmptyState>No observation activity has been recorded yet.</EmptyState>;
+  return (
+    <div className="space-y-2">
+      {records.map((record) => (
+        <Card key={record.id} className="py-3">
+          <CardContent className="px-4">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <Badge variant={record.status === "error" ? "destructive" : "outline"}>{record.status}</Badge>
+                  <Badge variant="secondary">{record.source}</Badge>
+                  <span className="text-sm font-medium">{record.resource_type}</span>
+                  <span className="text-sm text-muted-foreground">{record.action}</span>
+                </div>
+                <p className="truncate text-sm text-muted-foreground">{record.message ?? record.resource_key}</p>
+                {record.project_path ? <code className="mt-2 block truncate text-xs text-muted-foreground">{record.project_path}</code> : null}
+              </div>
+              <div className="shrink-0 text-xs text-muted-foreground">{fmtEpoch(record.occurred_at)}</div>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 function App() {
   const [overview, setOverview] = React.useState<AppOverview | null>(null);
   const [overviewRefreshing, setOverviewRefreshing] = React.useState(false);
@@ -960,12 +1001,17 @@ function App() {
   const [projectAgents, setProjectAgents] = React.useState<Record<string, ProjectAgentsOverview>>({});
   const [agentsLoadedPaths, setAgentsLoadedPaths] = React.useState<string[]>([]);
   const [storageOverview, setStorageOverview] = React.useState<StorageOverview | null>(null);
+  const [activityRecords, setActivityRecords] = React.useState<ObservationActivityRecord[]>([]);
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
   const [projectSearch, setProjectSearch] = React.useState("");
-  const [view, setView] = React.useState<"dashboard" | "agent-library" | "project">("dashboard");
+  const [view, setView] = React.useState<"dashboard" | "activity" | "agent-library" | "project">("dashboard");
   const [dashboardTab, setDashboardTab] = React.useState<DashboardTab>("overview");
   const [projectTab, setProjectTab] = React.useState<ProjectTab>("overview");
   const [error, setError] = React.useState<string | null>(null);
+
+  const refreshActivity = React.useCallback(() => {
+    invoke<ObservationActivityRecord[]>("inspect_activity", { limit: 150 }).then(setActivityRecords).catch(() => {});
+  }, []);
 
   const refreshLocalOverview = React.useCallback((seedGithubIssues = false) => {
     if (overviewRefreshInFlight.current) {
@@ -1000,17 +1046,19 @@ function App() {
         overviewRefreshInFlight.current = false;
         setOverviewRefreshing(false);
         invoke<StorageOverview>("inspect_storage").then(setStorageOverview).catch(() => {});
+        refreshActivity();
         if (pendingOverviewRefresh.current) {
           pendingOverviewRefresh.current = false;
           window.setTimeout(() => refreshLocalOverview(false), 0);
         }
       });
-  }, []);
+  }, [refreshActivity]);
 
   React.useEffect(() => {
     refreshLocalOverview(true);
     invoke<StorageOverview>("inspect_storage").then(setStorageOverview).catch(() => {});
-  }, [refreshLocalOverview]);
+    refreshActivity();
+  }, [refreshLocalOverview, refreshActivity]);
 
   React.useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1040,6 +1088,7 @@ function App() {
     let unlisten: (() => void) | undefined;
     listen<LocalObservationEvent>("observation://local-changed", (event) => {
       setLastLocalObservationAt(event.payload.observed_at);
+      refreshActivity();
       if (document.visibilityState !== "visible") return;
       if (event.payload.project_observations.length > 0) {
         setOverview((prev) => prev ? {
@@ -1061,7 +1110,7 @@ function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, [refreshLocalOverview, refreshObservedProjects]);
+  }, [refreshActivity, refreshLocalOverview, refreshObservedProjects]);
 
   // When navigating to a project, load cached GitHub data (no live call) if not yet loaded.
   React.useEffect(() => {
@@ -1102,7 +1151,11 @@ function App() {
         setGithubIssuesCacheLoaded((prev) => new Set([...prev, path]));
       })
       .catch(() => {})
-      .finally(() => setGithubIssuesRefreshing((prev) => { const next = new Set(prev); next.delete(path); return next; }));
+      .finally(() => {
+        refreshActivity();
+        invoke<StorageOverview>("inspect_storage").then(setStorageOverview).catch(() => {});
+        setGithubIssuesRefreshing((prev) => { const next = new Set(prev); next.delete(path); return next; });
+      });
   }
 
   function handleRefreshGithubRepo(path: string) {
@@ -1114,7 +1167,11 @@ function App() {
         setGithubRepoCacheLoaded((prev) => new Set([...prev, path]));
       })
       .catch(() => {})
-      .finally(() => setGithubRepoRefreshing((prev) => { const next = new Set(prev); next.delete(path); return next; }));
+      .finally(() => {
+        refreshActivity();
+        invoke<StorageOverview>("inspect_storage").then(setStorageOverview).catch(() => {});
+        setGithubRepoRefreshing((prev) => { const next = new Set(prev); next.delete(path); return next; });
+      });
   }
 
   React.useEffect(() => {
@@ -1206,6 +1263,13 @@ function App() {
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
+              <SidebarMenuButton isActive={view === "activity"} onClick={() => { setView("activity"); refreshActivity(); }} tooltip="Activity">
+                <History className="size-4" />
+                <span>Activity</span>
+                <Badge variant="outline" className="ml-auto group-data-[collapsible=icon]:hidden">{storageOverview?.activity_events ?? activityRecords.length}</Badge>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
               <SidebarMenuButton isActive={view === "agent-library"} onClick={() => setView("agent-library")} tooltip="Agent Library">
                 <Bot className="size-4" />
                 <span>Agent Library</span>
@@ -1255,7 +1319,7 @@ function App() {
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-4" />
-          <div className="truncate text-sm text-muted-foreground">{view === "dashboard" ? "Dashboard" : view === "agent-library" ? "Agent Library" : selected?.name}</div>
+          <div className="truncate text-sm text-muted-foreground">{view === "dashboard" ? "Dashboard" : view === "activity" ? "Activity" : view === "agent-library" ? "Agent Library" : selected?.name}</div>
           {lastLocalObservationAt ? <Badge variant="outline" className="ml-auto hidden sm:inline-flex">local changed {fmtEpoch(lastLocalObservationAt)}</Badge> : null}
           <div className={lastLocalObservationAt ? "" : "ml-auto"}>
             <Button size="sm" variant="outline" onClick={() => refreshLocalOverview(false)} disabled={overviewRefreshing}>
@@ -1265,13 +1329,13 @@ function App() {
           </div>
         </header>
         <section className="min-h-0 flex-1 overflow-y-auto p-6">
-        {view === "dashboard" || view === "agent-library" ? (
+        {view === "dashboard" || view === "activity" || view === "agent-library" ? (
           <Card className="mb-5 py-4">
             <CardContent className="flex flex-col gap-3 px-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{view === "agent-library" ? "Library" : "Dashboard"}</div>
-                <h2 className="truncate text-xl font-semibold tracking-tight">{view === "agent-library" ? "Agent Library" : "Projects by latest commit"}</h2>
-                <p className="mt-1 truncate text-sm text-muted-foreground">{view === "agent-library" ? overview.agent_library.root : overview.projects_root}</p>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{view === "agent-library" ? "Library" : view === "activity" ? "Activity" : "Dashboard"}</div>
+                <h2 className="truncate text-xl font-semibold tracking-tight">{view === "agent-library" ? "Agent Library" : view === "activity" ? "Observation Activity" : "Projects by latest commit"}</h2>
+                <p className="mt-1 truncate text-sm text-muted-foreground">{view === "agent-library" ? overview.agent_library.root : view === "activity" ? storageOverview?.path ?? "~/.project-index/project-index.sqlite" : overview.projects_root}</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Badge variant="secondary">{overview.projects.length} repos</Badge>
@@ -1317,6 +1381,8 @@ function App() {
             <TabsContent value="agent-inbox" className="mt-4"><AgentInboxDashboard records={overview.inbox_records} selectedProjectPath={selected?.path ?? null} /></TabsContent>
             <TabsContent value="github" className="mt-4"><GitHubIssuesDashboard issues={allGithubIssues} selectedProjectPath={selected?.path ?? null} /></TabsContent>
           </Tabs>
+        ) : view === "activity" ? (
+          <ActivityPanel records={activityRecords} />
         ) : view === "agent-library" ? (
           <AgentLibraryPanel library={overview.agent_library} />
         ) : selected ? (

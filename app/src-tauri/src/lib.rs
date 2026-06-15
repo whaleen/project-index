@@ -237,6 +237,21 @@ struct StorageOverview {
     observations: u64,
     github_repos: u64,
     github_issues: u64,
+    activity_events: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ObservationActivityRecord {
+    id: i64,
+    occurred_at: u64,
+    source: String,
+    resource_key: String,
+    resource_type: String,
+    project_path: Option<String>,
+    action: String,
+    status: String,
+    message: Option<String>,
+    detail_json: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -307,7 +322,21 @@ fn open_observation_db() -> rusqlite::Result<Connection> {
             payload_json TEXT NOT NULL,
             last_error TEXT
         );
-        PRAGMA user_version = 1;",
+        CREATE TABLE IF NOT EXISTS observation_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            occurred_at INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            resource_key TEXT NOT NULL,
+            resource_type TEXT NOT NULL,
+            project_path TEXT,
+            action TEXT NOT NULL,
+            status TEXT NOT NULL,
+            message TEXT,
+            detail_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_observation_events_occurred_at ON observation_events(occurred_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_observation_events_project_path ON observation_events(project_path);
+        PRAGMA user_version = 2;"
     )?;
     Ok(conn)
 }
@@ -328,6 +357,7 @@ fn load_storage_overview() -> StorageOverview {
             observations: 0,
             github_repos: 0,
             github_issues: 0,
+            activity_events: 0,
         };
     };
     StorageOverview {
@@ -335,7 +365,75 @@ fn load_storage_overview() -> StorageOverview {
         observations: sqlite_count(&conn, "observations"),
         github_repos: sqlite_count(&conn, "github_repos"),
         github_issues: sqlite_count(&conn, "github_issues"),
+        activity_events: sqlite_count(&conn, "observation_events"),
     }
+}
+
+fn record_activity_event(
+    source: &str,
+    resource_key: &str,
+    resource_type: &str,
+    project_path: Option<&str>,
+    action: &str,
+    status: &str,
+    message: Option<&str>,
+    detail_json: Option<&str>,
+) {
+    let Ok(conn) = open_observation_db() else {
+        return;
+    };
+    let _ = conn.execute(
+        "INSERT INTO observation_events (occurred_at, source, resource_key, resource_type, project_path, action, status, message, detail_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            now_epoch_secs() as i64,
+            source,
+            resource_key,
+            resource_type,
+            project_path,
+            action,
+            status,
+            message,
+            detail_json,
+        ],
+    );
+    let _ = conn.execute(
+        "DELETE FROM observation_events WHERE id NOT IN (SELECT id FROM observation_events ORDER BY occurred_at DESC, id DESC LIMIT 5000)",
+        [],
+    );
+}
+
+fn load_activity_events(limit: u32) -> Vec<ObservationActivityRecord> {
+    let Ok(conn) = open_observation_db() else {
+        return Vec::new();
+    };
+    let limit = limit.clamp(1, 500) as i64;
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id, occurred_at, source, resource_key, resource_type, project_path, action, status, message, detail_json
+         FROM observation_events
+         ORDER BY occurred_at DESC, id DESC
+         LIMIT ?1",
+    ) else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map(params![limit], |row| {
+        let occurred_at: i64 = row.get(1)?;
+        Ok(ObservationActivityRecord {
+            id: row.get(0)?,
+            occurred_at: occurred_at.max(0) as u64,
+            source: row.get(2)?,
+            resource_key: row.get(3)?,
+            resource_type: row.get(4)?,
+            project_path: row.get(5)?,
+            action: row.get(6)?,
+            status: row.get(7)?,
+            message: row.get(8)?,
+            detail_json: row.get(9)?,
+        })
+    }) else {
+        return Vec::new();
+    };
+    rows.flatten().collect()
 }
 
 fn store_observation_snapshot<T: Serialize>(
@@ -437,6 +535,16 @@ fn load_github_issues_cache() -> GitHubIssuesCache {
         let json_cache = load_github_issues_cache_from_json();
         if !json_cache.is_empty() {
             save_github_issues_cache(&json_cache);
+            record_activity_event(
+                "storage",
+                "GitHubIssuesCache",
+                "GitHubIssues",
+                None,
+                "imported",
+                "ok",
+                Some("Imported legacy GitHub issues JSON cache into SQLite"),
+                None,
+            );
             return json_cache;
         }
     }
@@ -494,6 +602,16 @@ fn load_github_repo_cache() -> GitHubRepoCache {
         let json_cache = load_github_repos_cache_from_json();
         if !json_cache.is_empty() {
             save_github_repo_cache(&json_cache);
+            record_activity_event(
+                "storage",
+                "GitHubRepoCache",
+                "GitHubRepo",
+                None,
+                "imported",
+                "ok",
+                Some("Imported legacy GitHub repo JSON cache into SQLite"),
+                None,
+            );
             return json_cache;
         }
     }
@@ -1232,6 +1350,16 @@ fn refresh_github_issues_live(path: &Path) -> GitHubIssuesResponse {
                 .get(&repo)
                 .map(|e| e.fetched_at)
                 .unwrap_or_else(now_epoch_secs);
+            record_activity_event(
+                "github",
+                &format!("GitHubIssues:{repo}"),
+                "GitHubIssues",
+                Some(&path.display().to_string()),
+                "refreshed",
+                "ok",
+                Some(&format!("{} open issues", records.len())),
+                None,
+            );
             GitHubIssuesResponse {
                 records,
                 freshness: issues_freshness(fetched_at, None, "github-live"),
@@ -1239,6 +1367,16 @@ fn refresh_github_issues_live(path: &Path) -> GitHubIssuesResponse {
         }
         Err(e) => {
             let cached = query_github_issues_cached(path);
+            record_activity_event(
+                "github",
+                &format!("GitHubIssues:{repo}"),
+                "GitHubIssues",
+                Some(&path.display().to_string()),
+                "refreshed",
+                "error",
+                Some(&e),
+                None,
+            );
             GitHubIssuesResponse {
                 freshness: issues_freshness(cached.freshness.fetched_at, Some(e), "github-cache"),
                 ..cached
@@ -1258,6 +1396,16 @@ fn refresh_github_repo_live(path: &Path) -> GitHubRepoResponse {
                 .get(&repo)
                 .map(|e| e.fetched_at)
                 .unwrap_or_else(now_epoch_secs);
+            record_activity_event(
+                "github",
+                &format!("GitHubRepo:{repo}"),
+                "GitHubRepo",
+                Some(&path.display().to_string()),
+                "refreshed",
+                "ok",
+                Some("Repository metadata refreshed"),
+                None,
+            );
             GitHubRepoResponse {
                 record: Some(record),
                 freshness: repo_freshness(fetched_at, None, "github-live"),
@@ -1265,6 +1413,16 @@ fn refresh_github_repo_live(path: &Path) -> GitHubRepoResponse {
         }
         Err(e) => {
             let cached = query_github_repo_cached(path);
+            record_activity_event(
+                "github",
+                &format!("GitHubRepo:{repo}"),
+                "GitHubRepo",
+                Some(&path.display().to_string()),
+                "refreshed",
+                "error",
+                Some(&e),
+                None,
+            );
             GitHubRepoResponse {
                 freshness: repo_freshness(cached.freshness.fetched_at, Some(e), "github-cache"),
                 ..cached
@@ -2133,6 +2291,11 @@ fn inspect_storage() -> StorageOverview {
     load_storage_overview()
 }
 
+#[tauri::command]
+fn inspect_activity(limit: Option<u32>) -> Vec<ObservationActivityRecord> {
+    load_activity_events(limit.unwrap_or(100))
+}
+
 fn watch_if_exists(watcher: &mut RecommendedWatcher, path: PathBuf, mode: RecursiveMode) {
     if path.exists() {
         let _ = watcher.watch(&path, mode);
@@ -2238,6 +2401,20 @@ fn start_local_observation_watcher(app_handle: tauri::AppHandle) {
                                         .collect()
                                 })
                             };
+                        record_activity_event(
+                            "watcher",
+                            "LocalFilesystem",
+                            "LocalFilesystem",
+                            project_paths_vec.first().map(String::as_str),
+                            "observed",
+                            "ok",
+                            Some(&format!(
+                                "{} filesystem paths changed across {} projects",
+                                paths.len(),
+                                project_paths_vec.len()
+                            )),
+                            None,
+                        );
                         let _ = tauri::Emitter::emit(
                             &app_handle,
                             "observation://local-changed",
@@ -2275,7 +2452,8 @@ pub fn run() {
             inspect_git_summary,
             inspect_agent_library,
             inspect_project_agents,
-            inspect_storage
+            inspect_storage,
+            inspect_activity
         ])
         .run(tauri::generate_context!())
         .expect("error while running project-index desktop app");

@@ -60,6 +60,19 @@ CREATE TABLE github_issues (
   payload_json TEXT NOT NULL,
   last_error TEXT
 );
+
+CREATE TABLE observation_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  occurred_at INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  resource_key TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  project_path TEXT,
+  action TEXT NOT NULL,
+  status TEXT NOT NULL,
+  message TEXT,
+  detail_json TEXT
+);
 ```
 
 ## Migration plan
@@ -67,7 +80,8 @@ CREATE TABLE github_issues (
 1. Add SQLite dependency and initialize `~/.project-index/project-index.sqlite`.
 2. Store GitHub repo/issues caches in SQLite, while preserving read-only JSON cache fallback for existing users.
 3. Store app/project observation snapshots by resource key.
-4. Hydrate startup from SQLite where useful, then refresh via watchers/commands.
+4. Store bounded observation activity events for the desktop Activity page.
+5. Hydrate startup from SQLite where useful, then refresh via watchers/commands.
 5. Retire JSON cache writes after confidence period; keep JSON read fallback longer if harmless.
 
 ## Consequences
