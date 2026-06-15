@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import ReactMarkdown from "react-markdown";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import remarkGfm from "remark-gfm";
 import {
   Bot,
@@ -113,6 +114,12 @@ type GitHubRepoResponse = {
 type GitHubIssuesResponse = {
   records: GitHubIssueRecord[];
   freshness: GitHubFreshness;
+};
+
+type LocalObservationEvent = {
+  reason: string;
+  observed_at: number;
+  paths: string[];
 };
 
 function fmtEpoch(epochSecs: number): string {
@@ -918,6 +925,7 @@ function EmptyState({ children }: React.PropsWithChildren) {
 function App() {
   const [overview, setOverview] = React.useState<AppOverview | null>(null);
   const [overviewRefreshing, setOverviewRefreshing] = React.useState(false);
+  const [lastLocalObservationAt, setLastLocalObservationAt] = React.useState<number>(0);
   // GitHub issues: keyed by project_path -> { records, freshness }
   const [githubIssuesMap, setGithubIssuesMap] = React.useState<Record<string, GitHubIssuesResponse>>({});
   // GitHub repo: keyed by project_path -> { record, freshness }
@@ -975,6 +983,22 @@ function App() {
       if (document.visibilityState === "visible") refreshLocalOverview(false);
     }, 60_000);
     return () => window.clearInterval(interval);
+  }, [refreshLocalOverview]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    listen<LocalObservationEvent>("observation://local-changed", (event) => {
+      setLastLocalObservationAt(event.payload.observed_at);
+      if (document.visibilityState === "visible") refreshLocalOverview(false);
+    }).then((dispose) => {
+      if (cancelled) dispose();
+      else unlisten = dispose;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [refreshLocalOverview]);
 
   // When navigating to a project, load cached GitHub data (no live call) if not yet loaded.
@@ -1170,7 +1194,8 @@ function App() {
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-4" />
           <div className="truncate text-sm text-muted-foreground">{view === "dashboard" ? "Dashboard" : view === "agent-library" ? "Agent Library" : selected?.name}</div>
-          <div className="ml-auto">
+          {lastLocalObservationAt ? <Badge variant="outline" className="ml-auto hidden sm:inline-flex">local changed {fmtEpoch(lastLocalObservationAt)}</Badge> : null}
+          <div className={lastLocalObservationAt ? "" : "ml-auto"}>
             <Button size="sm" variant="outline" onClick={() => refreshLocalOverview(false)} disabled={overviewRefreshing}>
               <RefreshCw className={cn("size-3.5", overviewRefreshing && "animate-spin")} />
               Refresh local

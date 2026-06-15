@@ -1,13 +1,14 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use base64::Engine;
+use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
@@ -220,6 +221,13 @@ struct ProjectAgentsOverview {
     skills: Vec<ProjectSkillRecord>,
     mcp_servers: Vec<McpServerRecord>,
     sessions: Vec<AgentSessionRecord>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct LocalObservationEvent {
+    reason: String,
+    observed_at: u64,
+    paths: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -914,7 +922,10 @@ fn query_github_issues_cached(path: &Path) -> GitHubIssuesResponse {
     }
     GitHubIssuesResponse {
         records: vec![],
-        freshness: GitHubFreshness { source: "github-cache".into(), ..Default::default() },
+        freshness: GitHubFreshness {
+            source: "github-cache".into(),
+            ..Default::default()
+        },
     }
 }
 
@@ -932,7 +943,10 @@ fn query_github_repo_cached(path: &Path) -> GitHubRepoResponse {
     }
     GitHubRepoResponse {
         record: None,
-        freshness: GitHubFreshness { source: "github-cache".into(), ..Default::default() },
+        freshness: GitHubFreshness {
+            source: "github-cache".into(),
+            ..Default::default()
+        },
     }
 }
 
@@ -1258,11 +1272,16 @@ fn sanitize_project_component(path: &Path) -> String {
 }
 
 fn claude_project_dirs(project_path: &Path) -> Vec<PathBuf> {
-    let Some(home) = home_dir() else { return vec![]; };
+    let Some(home) = home_dir() else {
+        return vec![];
+    };
     let base = home.join(".claude").join("projects");
     let path_str = project_path.to_string_lossy();
     let mut dirs = Vec::new();
-    for encoded in [path_str.replace('/', "-"), path_str.replace('/', "-").replace('_', "-")] {
+    for encoded in [
+        path_str.replace('/', "-"),
+        path_str.replace('/', "-").replace('_', "-"),
+    ] {
         let dir = base.join(encoded);
         if dir.exists() && !dirs.contains(&dir) {
             dirs.push(dir);
@@ -1272,17 +1291,32 @@ fn claude_project_dirs(project_path: &Path) -> Vec<PathBuf> {
 }
 
 fn read_markdown_files(dir: &Path, agent: &str, out: &mut Vec<AgentMemoryFile>) {
-    if !dir.is_dir() { return; }
+    if !dir.is_dir() {
+        return;
+    }
     let mut entries: Vec<_> = fs::read_dir(dir)
         .map(|r| r.filter_map(|e| e.ok()).collect())
         .unwrap_or_default();
     entries.sort_by_key(|e: &std::fs::DirEntry| e.file_name());
     for entry in entries {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
-        let Ok(content) = fs::read_to_string(&path) else { continue; };
-        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("memory").to_string();
-        out.push(AgentMemoryFile { agent: agent.to_string(), name, path: path.display().to_string(), content });
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("memory")
+            .to_string();
+        out.push(AgentMemoryFile {
+            agent: agent.to_string(),
+            name,
+            path: path.display().to_string(),
+            content,
+        });
     }
 }
 
@@ -1294,18 +1328,31 @@ fn load_agent_memories(path: &Path) -> Vec<AgentMemoryFile> {
     if let Some(home) = home_dir() {
         let base = home.join(".codex").join("memories");
         let repo_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        for dir in [base.join(repo_name), base.join(sanitize_project_component(path))] {
+        for dir in [
+            base.join(repo_name),
+            base.join(sanitize_project_component(path)),
+        ] {
             read_markdown_files(&dir, "codex", &mut out);
         }
         let gemini = home.join(".gemini").join("GEMINI.md");
         if let Ok(content) = fs::read_to_string(&gemini) {
-            out.push(AgentMemoryFile { agent: "gemini".into(), name: "GEMINI".into(), path: gemini.display().to_string(), content });
+            out.push(AgentMemoryFile {
+                agent: "gemini".into(),
+                name: "GEMINI".into(),
+                path: gemini.display().to_string(),
+                content,
+            });
         }
         let pi_agent = home.join(".pi").join("agent");
         for file in ["AGENTS.md", "README.md"] {
             let candidate = pi_agent.join(file);
             if let Ok(content) = fs::read_to_string(&candidate) {
-                out.push(AgentMemoryFile { agent: "pi".into(), name: file.trim_end_matches(".md").into(), path: candidate.display().to_string(), content });
+                out.push(AgentMemoryFile {
+                    agent: "pi".into(),
+                    name: file.trim_end_matches(".md").into(),
+                    path: candidate.display().to_string(),
+                    content,
+                });
             }
         }
     }
@@ -1314,19 +1361,37 @@ fn load_agent_memories(path: &Path) -> Vec<AgentMemoryFile> {
 }
 
 fn load_skill_lock_sources(path: &Path) -> BTreeMap<String, String> {
-    let Ok(content) = fs::read_to_string(path.join("skills-lock.json")) else { return BTreeMap::new(); };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else { return BTreeMap::new(); };
-    let Some(skills) = json.get("skills").and_then(|v| v.as_object()) else { return BTreeMap::new(); };
-    skills.iter().map(|(name, val)| {
-        let source = val.get("source").and_then(|v| v.as_str()).unwrap_or("skills-lock.json").to_string();
-        (name.clone(), source)
-    }).collect()
+    let Ok(content) = fs::read_to_string(path.join("skills-lock.json")) else {
+        return BTreeMap::new();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return BTreeMap::new();
+    };
+    let Some(skills) = json.get("skills").and_then(|v| v.as_object()) else {
+        return BTreeMap::new();
+    };
+    skills
+        .iter()
+        .map(|(name, val)| {
+            let source = val
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("skills-lock.json")
+                .to_string();
+            (name.clone(), source)
+        })
+        .collect()
 }
 
 fn load_project_skills(path: &Path) -> Vec<ProjectSkillRecord> {
     let lock_sources = load_skill_lock_sources(path);
     let specs: [(&str, &str, &[&str], bool); 5] = [
-        (".agents/skills", "shared project", &["codex", "gemini", "pi"], false),
+        (
+            ".agents/skills",
+            "shared project",
+            &["codex", "gemini", "pi"],
+            false,
+        ),
         (".claude/skills", "claude project", &["claude"], false),
         (".codex/skills", "codex project", &["codex"], false),
         (".gemini/skills", "gemini project", &["gemini"], false),
@@ -1335,8 +1400,12 @@ fn load_project_skills(path: &Path) -> Vec<ProjectSkillRecord> {
     let mut out = Vec::new();
     for (rel, scope, seen_by, allow_root_md) in specs {
         let dir = path.join(rel);
-        if !dir.is_dir() { continue; }
-        let mut entries: Vec<_> = fs::read_dir(&dir).map(|r| r.filter_map(|e| e.ok()).collect()).unwrap_or_default();
+        if !dir.is_dir() {
+            continue;
+        }
+        let mut entries: Vec<_> = fs::read_dir(&dir)
+            .map(|r| r.filter_map(|e| e.ok()).collect())
+            .unwrap_or_default();
         entries.sort_by_key(|e: &std::fs::DirEntry| e.file_name());
         for entry in entries {
             let path = entry.path();
@@ -1344,13 +1413,30 @@ fn load_project_skills(path: &Path) -> Vec<ProjectSkillRecord> {
                 path.join("SKILL.md")
             } else if allow_root_md && path.extension().and_then(|e| e.to_str()) == Some("md") {
                 path.clone()
-            } else { continue; };
+            } else {
+                continue;
+            };
             let content = fs::read_to_string(&skill_path).unwrap_or_default();
-            let fallback = skill_path.parent().and_then(|p| p.file_name()).and_then(|s| s.to_str()).unwrap_or("skill").to_string();
+            let fallback = skill_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str())
+                .unwrap_or("skill")
+                .to_string();
             let name = frontmatter_field(&content, "name").unwrap_or(fallback);
             let description = frontmatter_field(&content, "description");
-            let source = lock_sources.get(&name).cloned().unwrap_or_else(|| "filesystem".into());
-            out.push(ProjectSkillRecord { name, scope: scope.into(), source, path: skill_path.display().to_string(), seen_by: seen_by.iter().map(|s| s.to_string()).collect(), description });
+            let source = lock_sources
+                .get(&name)
+                .cloned()
+                .unwrap_or_else(|| "filesystem".into());
+            out.push(ProjectSkillRecord {
+                name,
+                scope: scope.into(),
+                source,
+                path: skill_path.display().to_string(),
+                seen_by: seen_by.iter().map(|s| s.to_string()).collect(),
+                description,
+            });
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.scope.cmp(&b.scope)));
@@ -1358,14 +1444,36 @@ fn load_project_skills(path: &Path) -> Vec<ProjectSkillRecord> {
 }
 
 fn load_mcp_servers(path: &Path) -> Vec<McpServerRecord> {
-    let Ok(content) = fs::read_to_string(path.join(".mcp.json")) else { return vec![]; };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else { return vec![]; };
-    let Some(servers) = json.get("mcpServers").and_then(|v| v.as_object()) else { return vec![]; };
+    let Ok(content) = fs::read_to_string(path.join(".mcp.json")) else {
+        return vec![];
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return vec![];
+    };
+    let Some(servers) = json.get("mcpServers").and_then(|v| v.as_object()) else {
+        return vec![];
+    };
     let mut out = Vec::new();
     for (name, val) in servers {
-        let command = val.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let args = val.get("args").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
-        out.push(McpServerRecord { name: name.clone(), command, args });
+        let command = val
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let args = val
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(McpServerRecord {
+            name: name.clone(),
+            command,
+            args,
+        });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
@@ -1380,9 +1488,15 @@ fn read_first_jsonl_message(path: &Path) -> Option<String> {
     for line in content.lines() {
         let v: serde_json::Value = serde_json::from_str(line).ok()?;
         if v.get("type").and_then(|t| t.as_str()) == Some("user") {
-            if let Some(text) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+            if let Some(text) = v
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_str())
+            {
                 let trimmed = text.trim();
-                if !trimmed.is_empty() { return Some(trimmed.chars().take(120).collect()); }
+                if !trimmed.is_empty() {
+                    return Some(trimmed.chars().take(120).collect());
+                }
             }
         }
         if v.get("type").and_then(|t| t.as_str()) == Some("message") {
@@ -1390,8 +1504,14 @@ fn read_first_jsonl_message(path: &Path) -> Option<String> {
             if msg.get("role").and_then(|r| r.as_str()) == Some("user") {
                 if let Some(arr) = msg.get("content").and_then(|c| c.as_array()) {
                     for block in arr {
-                        let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("").trim();
-                        if !text.is_empty() { return Some(text.chars().take(120).collect()); }
+                        let text = block
+                            .get("text")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .trim();
+                        if !text.is_empty() {
+                            return Some(text.chars().take(120).collect());
+                        }
                     }
                 }
             }
@@ -1401,31 +1521,69 @@ fn read_first_jsonl_message(path: &Path) -> Option<String> {
 }
 
 fn jsonl_session_files(dir: &Path) -> Vec<(PathBuf, String, u64)> {
-    fs::read_dir(dir).into_iter().flatten().filter_map(|e| e.ok()).filter_map(|e| {
-        let path = e.path();
-        if path.extension().and_then(|x| x.to_str()) != Some("jsonl") { return None; }
-        let id = path.file_stem()?.to_str()?.to_string();
-        let mtime = e.metadata().ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
-        Some((path, id, mtime))
-    }).collect()
+    fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let path = e.path();
+            if path.extension().and_then(|x| x.to_str()) != Some("jsonl") {
+                return None;
+            }
+            let id = path.file_stem()?.to_str()?.to_string();
+            let mtime = e
+                .metadata()
+                .ok()?
+                .modified()
+                .ok()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs();
+            Some((path, id, mtime))
+        })
+        .collect()
 }
 
 fn load_agent_sessions(project_path: &Path) -> Vec<AgentSessionRecord> {
     let mut out = Vec::new();
     for dir in claude_project_dirs(project_path) {
         for (path, id, mtime) in jsonl_session_files(&dir) {
-            out.push(AgentSessionRecord { agent: "claude".into(), id: Some(id), started_at: unix_to_iso(mtime), first_message: read_first_jsonl_message(&path), path: Some(path.display().to_string()) });
+            out.push(AgentSessionRecord {
+                agent: "claude".into(),
+                id: Some(id),
+                started_at: unix_to_iso(mtime),
+                first_message: read_first_jsonl_message(&path),
+                path: Some(path.display().to_string()),
+            });
         }
     }
     if let Some(home) = home_dir() {
-        let pi_dir = home.join(".pi").join("agent").join("sessions").join(format!("--{}--", project_path.to_string_lossy().trim_start_matches('/').replace('/', "-")));
+        let pi_dir = home
+            .join(".pi")
+            .join("agent")
+            .join("sessions")
+            .join(format!(
+                "--{}--",
+                project_path
+                    .to_string_lossy()
+                    .trim_start_matches('/')
+                    .replace('/', "-")
+            ));
         for (path, id, mtime) in jsonl_session_files(&pi_dir) {
-            out.push(AgentSessionRecord { agent: "pi".into(), id: Some(id), started_at: unix_to_iso(mtime), first_message: read_first_jsonl_message(&path), path: Some(path.display().to_string()) });
+            out.push(AgentSessionRecord {
+                agent: "pi".into(),
+                id: Some(id),
+                started_at: unix_to_iso(mtime),
+                first_message: read_first_jsonl_message(&path),
+                path: Some(path.display().to_string()),
+            });
         }
         let codex_root = home.join(".codex").join("sessions");
         let project_str = project_path.to_string_lossy().to_string();
         for path in find_jsonl_limited(&codex_root, 4, 2500) {
-            if let Some(session) = parse_codex_session_record(&path, &project_str) { out.push(session); }
+            if let Some(session) = parse_codex_session_record(&path, &project_str) {
+                out.push(session);
+            }
         }
         out.extend(load_gemini_session_records(project_path, &home));
     }
@@ -1436,13 +1594,22 @@ fn load_agent_sessions(project_path: &Path) -> Vec<AgentSessionRecord> {
 
 fn find_jsonl_limited(root: &Path, depth: u8, max: usize) -> Vec<PathBuf> {
     fn walk(dir: &Path, depth: u8, max: usize, out: &mut Vec<PathBuf>) {
-        if depth == 0 || out.len() >= max { return; }
-        let Ok(entries) = fs::read_dir(dir) else { return; };
+        if depth == 0 || out.len() >= max {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
-            if out.len() >= max { return; }
+            if out.len() >= max {
+                return;
+            }
             let path = entry.path();
-            if path.is_dir() { walk(&path, depth - 1, max, out); }
-            else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") { out.push(path); }
+            if path.is_dir() {
+                walk(&path, depth - 1, max, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                out.push(path);
+            }
         }
     }
     let mut out = Vec::new();
@@ -1454,45 +1621,108 @@ fn parse_codex_session_record(path: &Path, project_path: &str) -> Option<AgentSe
     let content = fs::read_to_string(path).ok()?;
     let meta: serde_json::Value = serde_json::from_str(content.lines().next()?).ok()?;
     let payload = meta.get("payload")?;
-    if payload.get("cwd").and_then(|v| v.as_str())? != project_path { return None; }
-    let id = payload.get("id").and_then(|v| v.as_str()).map(str::to_string);
-    let started_at = payload.get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if payload.get("cwd").and_then(|v| v.as_str())? != project_path {
+        return None;
+    }
+    let id = payload
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let started_at = payload
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let first_message = content.lines().find_map(|line| {
         let v: serde_json::Value = serde_json::from_str(line).ok()?;
-        if v.get("type").and_then(|t| t.as_str()) != Some("response_item") { return None; }
+        if v.get("type").and_then(|t| t.as_str()) != Some("response_item") {
+            return None;
+        }
         let p = v.get("payload")?;
-        if p.get("role").and_then(|r| r.as_str()) != Some("user") { return None; }
+        if p.get("role").and_then(|r| r.as_str()) != Some("user") {
+            return None;
+        }
         for block in p.get("content")?.as_array()? {
-            let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("").trim();
-            if !text.is_empty() && !text.starts_with("<environment_context>") { return Some(text.chars().take(120).collect()); }
+            let text = block
+                .get("text")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .trim();
+            if !text.is_empty() && !text.starts_with("<environment_context>") {
+                return Some(text.chars().take(120).collect());
+            }
         }
         None
     });
-    Some(AgentSessionRecord { agent: "codex".into(), id, started_at, first_message, path: Some(path.display().to_string()) })
+    Some(AgentSessionRecord {
+        agent: "codex".into(),
+        id,
+        started_at,
+        first_message,
+        path: Some(path.display().to_string()),
+    })
 }
 
 fn load_gemini_session_records(project_path: &Path, home: &Path) -> Vec<AgentSessionRecord> {
     let gemini_dir = home.join(".gemini");
     let project_str = project_path.to_string_lossy();
-    let project_name = fs::read_to_string(gemini_dir.join("projects.json")).ok()
+    let project_name = fs::read_to_string(gemini_dir.join("projects.json"))
+        .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.get("projects")?.get(project_str.as_ref())?.as_str().map(str::to_string));
-    let Some(project_name) = project_name else { return vec![]; };
+        .and_then(|v| {
+            v.get("projects")?
+                .get(project_str.as_ref())?
+                .as_str()
+                .map(str::to_string)
+        });
+    let Some(project_name) = project_name else {
+        return vec![];
+    };
     let chats = gemini_dir.join("tmp").join(project_name).join("chats");
-    let Ok(entries) = fs::read_dir(chats) else { return vec![]; };
+    let Ok(entries) = fs::read_dir(chats) else {
+        return vec![];
+    };
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") { continue; }
-        let Ok(content) = fs::read_to_string(&path) else { continue; };
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) else { continue; };
-        let id = v.get("sessionId").and_then(|s| s.as_str()).map(str::to_string);
-        let started_at = v.get("startTime").and_then(|s| s.as_str()).unwrap_or("").to_string();
-        let first_message = v.get("messages").and_then(|m| m.as_array()).and_then(|msgs| msgs.iter().find_map(|msg| {
-            if msg.get("type").and_then(|t| t.as_str()) != Some("user") { return None; }
-            msg.get("content")?.as_str().map(|s| s.chars().take(120).collect())
-        }));
-        out.push(AgentSessionRecord { agent: "gemini".into(), id, started_at, first_message, path: Some(path.display().to_string()) });
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        let id = v
+            .get("sessionId")
+            .and_then(|s| s.as_str())
+            .map(str::to_string);
+        let started_at = v
+            .get("startTime")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
+        let first_message = v
+            .get("messages")
+            .and_then(|m| m.as_array())
+            .and_then(|msgs| {
+                msgs.iter().find_map(|msg| {
+                    if msg.get("type").and_then(|t| t.as_str()) != Some("user") {
+                        return None;
+                    }
+                    msg.get("content")?
+                        .as_str()
+                        .map(|s| s.chars().take(120).collect())
+                })
+            });
+        out.push(AgentSessionRecord {
+            agent: "gemini".into(),
+            id,
+            started_at,
+            first_message,
+            path: Some(path.display().to_string()),
+        });
     }
     out
 }
@@ -1515,7 +1745,8 @@ fn observe_project(path: &Path) -> ProjectObservation {
         github_issues: summarize_github_issues(path),
         visuals: project_visuals(path),
         readme: read_project_readme(path),
-        latest_commit_epoch: git_output(path, &["log", "-1", "--format=%ct"]).and_then(|s| s.parse().ok()),
+        latest_commit_epoch: git_output(path, &["log", "-1", "--format=%ct"])
+            .and_then(|s| s.parse().ok()),
         latest_commit: git_output(path, &["log", "-1", "--pretty=%h %cr %s"]),
     }
 }
@@ -1606,8 +1837,93 @@ fn inspect_project_agents(path: String) -> ProjectAgentsOverview {
     load_project_agents_overview(Path::new(&path))
 }
 
+fn watch_if_exists(watcher: &mut RecommendedWatcher, path: PathBuf, mode: RecursiveMode) {
+    if path.exists() {
+        let _ = watcher.watch(&path, mode);
+    }
+}
+
+fn start_local_observation_watcher(app_handle: tauri::AppHandle) {
+    thread::spawn(move || {
+        let root = default_projects_root();
+        let repo_paths = scan_git_repos(&root);
+        let (tx, rx) = mpsc::channel();
+        let Ok(mut watcher) = RecommendedWatcher::new(
+            move |result| {
+                let _ = tx.send(result);
+            },
+            NotifyConfig::default(),
+        ) else {
+            return;
+        };
+
+        watch_if_exists(&mut watcher, root, RecursiveMode::NonRecursive);
+        for repo_path in repo_paths {
+            watch_if_exists(&mut watcher, repo_path.clone(), RecursiveMode::NonRecursive);
+            watch_if_exists(
+                &mut watcher,
+                repo_path.join(".git"),
+                RecursiveMode::Recursive,
+            );
+            watch_if_exists(
+                &mut watcher,
+                repo_path.join(".agent").join("inbox"),
+                RecursiveMode::Recursive,
+            );
+            watch_if_exists(
+                &mut watcher,
+                repo_path.join(".claude"),
+                RecursiveMode::Recursive,
+            );
+            watch_if_exists(
+                &mut watcher,
+                repo_path.join(".agents"),
+                RecursiveMode::Recursive,
+            );
+        }
+
+        let mut pending_paths = BTreeSet::new();
+        let mut last_event_at: Option<Instant> = None;
+        loop {
+            match rx.recv_timeout(Duration::from_millis(750)) {
+                Ok(Ok(event)) => {
+                    for path in event.paths {
+                        pending_paths.insert(path.display().to_string());
+                    }
+                    last_event_at = Some(Instant::now());
+                }
+                Ok(Err(_)) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if !pending_paths.is_empty()
+                        && last_event_at
+                            .map(|instant| instant.elapsed() >= Duration::from_millis(750))
+                            .unwrap_or(false)
+                    {
+                        let paths = pending_paths.iter().take(25).cloned().collect();
+                        pending_paths.clear();
+                        let _ = tauri::Emitter::emit(
+                            &app_handle,
+                            "observation://local-changed",
+                            LocalObservationEvent {
+                                reason: "filesystem".to_string(),
+                                observed_at: now_epoch_secs(),
+                                paths,
+                            },
+                        );
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+}
+
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            start_local_observation_watcher(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             app_overview,
             inspect_project,
