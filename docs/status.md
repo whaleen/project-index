@@ -31,7 +31,7 @@
 
 ## What's Next
 
-1. Continue ADR 0003: add backend-owned observation store with per-resource snapshots and bounded local refresh queues. GitHub cached inspection, freshness metadata, manual refresh buttons, serialized remote calls, and lightweight local watcher events are in place.
+1. Continue ADR 0003: add backend-owned observation store with per-resource snapshots and bounded local refresh queues. GitHub cached inspection, freshness metadata, manual refresh buttons, serialized remote calls, lightweight local watcher events, and frontend local-refresh coalescing are in place.
 2. Agent inbox observation: refine the cross-project inbox dashboard, record detail view, filters, and copyable agent prompts
 3. Global agent view: surface `~/.claude`, `~/.codex`, `~/.gemini`, `~/.pi/agent`, `~/.agents` as a system-level tab
 4. Improve sessions: cross-project view, faster Codex scan, Gemini summaries

@@ -926,6 +926,8 @@ function App() {
   const [overview, setOverview] = React.useState<AppOverview | null>(null);
   const [overviewRefreshing, setOverviewRefreshing] = React.useState(false);
   const [lastLocalObservationAt, setLastLocalObservationAt] = React.useState<number>(0);
+  const overviewRefreshInFlight = React.useRef(false);
+  const pendingOverviewRefresh = React.useRef(false);
   // GitHub issues: keyed by project_path -> { records, freshness }
   const [githubIssuesMap, setGithubIssuesMap] = React.useState<Record<string, GitHubIssuesResponse>>({});
   // GitHub repo: keyed by project_path -> { record, freshness }
@@ -948,6 +950,11 @@ function App() {
   const [error, setError] = React.useState<string | null>(null);
 
   const refreshLocalOverview = React.useCallback((seedGithubIssues = false) => {
+    if (overviewRefreshInFlight.current) {
+      pendingOverviewRefresh.current = true;
+      return;
+    }
+    overviewRefreshInFlight.current = true;
     setOverviewRefreshing(true);
     invoke<AppOverview>("app_overview")
       .then((data) => {
@@ -971,7 +978,14 @@ function App() {
         setError(null);
       })
       .catch((err) => setError(String(err)))
-      .finally(() => setOverviewRefreshing(false));
+      .finally(() => {
+        overviewRefreshInFlight.current = false;
+        setOverviewRefreshing(false);
+        if (pendingOverviewRefresh.current) {
+          pendingOverviewRefresh.current = false;
+          window.setTimeout(() => refreshLocalOverview(false), 0);
+        }
+      });
   }, []);
 
   React.useEffect(() => {
