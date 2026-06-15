@@ -27,11 +27,11 @@
 - Nerd Font glyphs have no fallback
 - Codex session scan walks all historical session dirs on each project load
 - Gemini summary viewer not yet implemented
-- Project selection resets after full rescan
+- Desktop local refresh is currently manual/60s polling; filesystem watcher/event store from ADR 0003 is not implemented yet
 
 ## What's Next
 
-1. Tauri desktop companion: continue using `app/` as the rich UI discovery surface while preserving read-only behavior
+1. Continue ADR 0003: add backend-owned observation store, Tauri update events, local filesystem watchers, and bounded local refresh queues. GitHub cached inspection, freshness metadata, manual refresh buttons, and serialized remote calls are in place.
 2. Agent inbox observation: refine the cross-project inbox dashboard, record detail view, filters, and copyable agent prompts
 3. Global agent view: surface `~/.claude`, `~/.codex`, `~/.gemini`, `~/.pi/agent`, `~/.agents` as a system-level tab
 4. Improve sessions: cross-project view, faster Codex scan, Gemini summaries

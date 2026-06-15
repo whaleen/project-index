@@ -16,6 +16,7 @@ import {
   MessageSquareText,
   Plug,
   Radar,
+  RefreshCw,
   Search,
   TerminalSquare,
   Wrench,
@@ -96,6 +97,34 @@ type GitHubIssueRecord = {
   url: string | null;
   updated_at: string | null;
 };
+
+type GitHubFreshness = {
+  fetched_at: number; // unix epoch seconds
+  stale: boolean;
+  source: string; // "github-cache" | "github-live"
+  error: string | null;
+};
+
+type GitHubRepoResponse = {
+  record: GitHubRepoRecord | null;
+  freshness: GitHubFreshness;
+};
+
+type GitHubIssuesResponse = {
+  records: GitHubIssueRecord[];
+  freshness: GitHubFreshness;
+};
+
+function fmtEpoch(epochSecs: number): string {
+  if (epochSecs === 0) return "never";
+  const d = new Date(epochSecs * 1000);
+  const now = Date.now();
+  const diff = Math.floor((now - epochSecs * 1000) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return d.toLocaleDateString();
+}
 
 type AgentInboxRecord = {
   project_name: string;
@@ -556,7 +585,12 @@ function InboxPanel({ project }: { project: ProjectObservation }) {
   );
 }
 
-function GitHubRepoPanel({ project, repoData, loading }: { project: ProjectObservation; repoData: GitHubRepoRecord | null; loading: boolean }) {
+function FreshnessBadge({ freshness }: { freshness?: GitHubFreshness }) {
+  if (!freshness) return null;
+  return <Badge variant={freshness.stale ? "destructive" : "outline"}>updated {fmtEpoch(freshness.fetched_at)}</Badge>;
+}
+
+function GitHubRepoPanel({ project, repoData, freshness, refreshing, onRefresh }: { project: ProjectObservation; repoData: GitHubRepoRecord | null; freshness?: GitHubFreshness; refreshing: boolean; onRefresh: () => void }) {
   return (
     <ShellCard title="GitHub repository" description={project.github_issues.repo ?? "no GitHub remote"} icon={<GitPullRequest className="size-4" />} className="lg:col-span-2">
       {project.github_issues.repo ? (
@@ -565,8 +599,14 @@ function GitHubRepoPanel({ project, repoData, loading }: { project: ProjectObser
             <div className="flex gap-4">
               <RepoAvatar project={project} repoData={repoData} size="lg" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm text-muted-foreground">{repoData?.description ?? (loading ? "Loading GitHub repository metadata…" : "No description observed.")}</p>
+                <p className="text-sm text-muted-foreground">{repoData?.description ?? "No cached GitHub repository metadata observed."}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={onRefresh} disabled={refreshing}>
+                    <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+                    Refresh
+                  </Button>
+                  <FreshnessBadge freshness={freshness} />
+                  {freshness?.error ? <Badge variant="destructive">{freshness.error}</Badge> : null}
                   {repoData?.url ? <Button size="sm" variant="outline" asChild><a href={repoData.url}>GitHub</a></Button> : null}
                   {repoData?.homepage_url ? <Button size="sm" variant="outline" asChild><a href={repoData.homepage_url}>Deployed site</a></Button> : null}
                 </div>
@@ -597,7 +637,7 @@ function GitHubRepoPanel({ project, repoData, loading }: { project: ProjectObser
   );
 }
 
-function GitHubIssuesPanel({ project, issueCount, loading }: { project: ProjectObservation; issueCount: number; loading: boolean }) {
+function GitHubIssuesPanel({ project, issueCount, freshness, refreshing, onRefresh }: { project: ProjectObservation; issueCount: number; freshness?: GitHubFreshness; refreshing: boolean; onRefresh: () => void }) {
   return (
     <ShellCard title="GitHub issues" description={project.github_issues.repo ?? "no GitHub remote"} icon={<GitPullRequest className="size-4" />}>
       <div className="text-3xl font-semibold tracking-tight">{issueCount}</div>
@@ -605,11 +645,10 @@ function GitHubIssuesPanel({ project, issueCount, loading }: { project: ProjectO
         {project.github_issues.error
           ? project.github_issues.error
           : project.github_issues.available
-            ? loading
-              ? "Loading GitHub issues lazily."
-              : "Open GitHub issues are tracked alongside local agent inbox records."
+            ? "Open GitHub issues are tracked alongside local agent inbox records."
             : "No GitHub issue data observed for this project."}
       </p>
+      {project.github_issues.available ? <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={onRefresh} disabled={refreshing}><RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />Refresh</Button><FreshnessBadge freshness={freshness} />{freshness?.error ? <Badge variant="destructive">{freshness.error}</Badge> : null}</div> : null}
     </ShellCard>
   );
 }
@@ -878,12 +917,17 @@ function EmptyState({ children }: React.PropsWithChildren) {
 
 function App() {
   const [overview, setOverview] = React.useState<AppOverview | null>(null);
-  const [githubIssues, setGithubIssues] = React.useState<GitHubIssueRecord[]>([]);
-  const [githubRepos, setGithubRepos] = React.useState<Record<string, GitHubRepoRecord>>({});
-  const [githubLoadedPaths, setGithubLoadedPaths] = React.useState<string[]>([]);
-  const [githubRepoLoadedPaths, setGithubRepoLoadedPaths] = React.useState<string[]>([]);
-  const [githubLoading, setGithubLoading] = React.useState(false);
-  const [githubRepoLoading, setGithubRepoLoading] = React.useState(false);
+  const [overviewRefreshing, setOverviewRefreshing] = React.useState(false);
+  // GitHub issues: keyed by project_path -> { records, freshness }
+  const [githubIssuesMap, setGithubIssuesMap] = React.useState<Record<string, GitHubIssuesResponse>>({});
+  // GitHub repo: keyed by project_path -> { record, freshness }
+  const [githubReposMap, setGithubReposMap] = React.useState<Record<string, GitHubRepoResponse>>({});
+  // Which paths have had initial cache-load attempted (no live call, just cache query)
+  const [githubIssuesCacheLoaded, setGithubIssuesCacheLoaded] = React.useState<Set<string>>(new Set());
+  const [githubRepoCacheLoaded, setGithubRepoCacheLoaded] = React.useState<Set<string>>(new Set());
+  // Per-path refreshing state for UI indicators
+  const [githubIssuesRefreshing, setGithubIssuesRefreshing] = React.useState<Set<string>>(new Set());
+  const [githubRepoRefreshing, setGithubRepoRefreshing] = React.useState<Set<string>>(new Set());
   const [gitSummaries, setGitSummaries] = React.useState<Record<string, GitSummary>>({});
   const [gitLoadedPaths, setGitLoadedPaths] = React.useState<string[]>([]);
   const [projectAgents, setProjectAgents] = React.useState<Record<string, ProjectAgentsOverview>>({});
@@ -895,53 +939,97 @@ function App() {
   const [projectTab, setProjectTab] = React.useState<ProjectTab>("overview");
   const [error, setError] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
+  const refreshLocalOverview = React.useCallback((seedGithubIssues = false) => {
+    setOverviewRefreshing(true);
     invoke<AppOverview>("app_overview")
       .then((data) => {
         setOverview(data);
-        setGithubIssues(data.github_issue_records ?? []);
-        setSelectedPath(data.projects[0]?.path ?? null);
+        if (seedGithubIssues) {
+          // Seed issue counts from cached data bundled into overview. This never calls GitHub.
+          const issuesByPath: Record<string, GitHubIssuesResponse> = {};
+          const seededPaths = new Set<string>();
+          for (const record of data.github_issue_records ?? []) {
+            const p = record.project_path;
+            if (!issuesByPath[p]) {
+              issuesByPath[p] = { records: [], freshness: { fetched_at: 0, stale: true, source: "github-cache", error: null } };
+            }
+            issuesByPath[p].records.push(record);
+            seededPaths.add(p);
+          }
+          setGithubIssuesMap(issuesByPath);
+          setGithubIssuesCacheLoaded(seededPaths);
+        }
+        setSelectedPath((current) => current && data.projects.some((project) => project.path === current) ? current : data.projects[0]?.path ?? null);
+        setError(null);
       })
-      .catch((err) => setError(String(err)));
+      .catch((err) => setError(String(err)))
+      .finally(() => setOverviewRefreshing(false));
   }, []);
 
   React.useEffect(() => {
-    if (!overview || view !== "project" || !selectedPath) return;
-    const path = selectedPath;
-    const project = overview.projects.find((item) => item.path === path);
-    if (!project?.github_issues.repo || githubLoadedPaths.includes(path)) return;
-    let cancelled = false;
-    async function loadSelectedProjectIssues() {
-      setGithubLoading(true);
-      try {
-        const issues = await invoke<GitHubIssueRecord[]>("inspect_github_issues", { path });
-        if (!cancelled) setGithubIssues((prev) => [...prev.filter((issue) => issue.project_path !== path), ...issues].sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "")));
-      } finally {
-        if (!cancelled) { setGithubLoadedPaths((prev) => prev.includes(path) ? prev : [...prev, path]); setGithubLoading(false); }
-      }
-    }
-    loadSelectedProjectIssues();
-    return () => { cancelled = true; };
-  }, [overview, view, selectedPath, githubLoadedPaths]);
+    refreshLocalOverview(true);
+  }, [refreshLocalOverview]);
 
   React.useEffect(() => {
-    if (!overview || view !== "project" || !selectedPath) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") refreshLocalOverview(false);
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, [refreshLocalOverview]);
+
+  // When navigating to a project, load cached GitHub data (no live call) if not yet loaded.
+  React.useEffect(() => {
+    if (!overview || !selectedPath || githubIssuesCacheLoaded.has(selectedPath)) return;
     const path = selectedPath;
     const project = overview.projects.find((item) => item.path === path);
-    if (!project?.github_issues.repo || githubRepoLoadedPaths.includes(path)) return;
+    if (!project?.github_issues.repo) return;
     let cancelled = false;
-    async function loadSelectedProjectRepo() {
-      setGithubRepoLoading(true);
-      try {
-        const repo = await invoke<GitHubRepoRecord | null>("inspect_github_repo", { path });
-        if (!cancelled && repo) setGithubRepos((prev) => ({ ...prev, [path]: repo }));
-      } finally {
-        if (!cancelled) { setGithubRepoLoadedPaths((prev) => prev.includes(path) ? prev : [...prev, path]); setGithubRepoLoading(false); }
-      }
-    }
-    loadSelectedProjectRepo();
+    invoke<GitHubIssuesResponse>("inspect_github_issues", { path }).then((res) => {
+      if (!cancelled) setGithubIssuesMap((prev) => ({ ...prev, [path]: res }));
+    }).catch(() => {}).finally(() => {
+      if (!cancelled) setGithubIssuesCacheLoaded((prev) => new Set([...prev, path]));
+    });
     return () => { cancelled = true; };
-  }, [overview, view, selectedPath, githubRepoLoadedPaths]);
+  }, [overview, selectedPath, githubIssuesCacheLoaded]);
+
+  React.useEffect(() => {
+    if (!overview || !selectedPath || githubRepoCacheLoaded.has(selectedPath)) return;
+    const path = selectedPath;
+    const project = overview.projects.find((item) => item.path === path);
+    if (!project?.github_issues.repo) return;
+    let cancelled = false;
+    invoke<GitHubRepoResponse>("inspect_github_repo", { path }).then((res) => {
+      if (!cancelled) setGithubReposMap((prev) => ({ ...prev, [path]: res }));
+    }).catch(() => {}).finally(() => {
+      if (!cancelled) setGithubRepoCacheLoaded((prev) => new Set([...prev, path]));
+    });
+    return () => { cancelled = true; };
+  }, [overview, selectedPath, githubRepoCacheLoaded]);
+
+  // Explicit user-triggered refresh (live GitHub call)
+  function handleRefreshGithubIssues(path: string) {
+    if (githubIssuesRefreshing.has(path)) return;
+    setGithubIssuesRefreshing((prev) => new Set([...prev, path]));
+    invoke<GitHubIssuesResponse>("refresh_github_issues", { path })
+      .then((res) => {
+        setGithubIssuesMap((prev) => ({ ...prev, [path]: res }));
+        setGithubIssuesCacheLoaded((prev) => new Set([...prev, path]));
+      })
+      .catch(() => {})
+      .finally(() => setGithubIssuesRefreshing((prev) => { const next = new Set(prev); next.delete(path); return next; }));
+  }
+
+  function handleRefreshGithubRepo(path: string) {
+    if (githubRepoRefreshing.has(path)) return;
+    setGithubRepoRefreshing((prev) => new Set([...prev, path]));
+    invoke<GitHubRepoResponse>("refresh_github_repo", { path })
+      .then((res) => {
+        setGithubReposMap((prev) => ({ ...prev, [path]: res }));
+        setGithubRepoCacheLoaded((prev) => new Set([...prev, path]));
+      })
+      .catch(() => {})
+      .finally(() => setGithubRepoRefreshing((prev) => { const next = new Set(prev); next.delete(path); return next; }));
+  }
 
   React.useEffect(() => {
     if (!overview || view !== "project" || !selectedPath || gitLoadedPaths.includes(selectedPath)) return;
@@ -978,9 +1066,11 @@ function App() {
 
   const issueCountsByPath = React.useMemo(() => {
     const counts = new Map<string, number>();
-    for (const issue of githubIssues) counts.set(issue.project_path, (counts.get(issue.project_path) ?? 0) + 1);
+    for (const [path, resp] of Object.entries(githubIssuesMap)) {
+      counts.set(path, resp.records.length);
+    }
     return counts;
-  }, [githubIssues]);
+  }, [githubIssuesMap]);
 
   if (error) return <main className="grid h-full place-items-center"><EmptyState>{error}</EmptyState></main>;
   if (!overview) return <main className="grid h-full place-items-center text-sm text-muted-foreground">Loading project-index observations…</main>;
@@ -997,10 +1087,15 @@ function App() {
   }, {});
   const inboxProjects = overview.projects.filter((project) => project.inbox.installed).length;
   const activeInbox = overview.inbox_records.length;
-  const openIssues = githubIssues.length;
+  const allGithubIssues = Object.values(githubIssuesMap).flatMap((response) => response.records);
+  const openIssues = allGithubIssues.length;
   const selectedInboxRecords = overview.inbox_records.filter((record) => record.project_path === selected?.path);
-  const selectedGithubIssues = githubIssues.filter((issue) => issue.project_path === selected?.path);
-  const selectedGithubRepo = selected ? githubRepos[selected.path] ?? null : null;
+  const selectedGithubIssuesResponse = selected ? githubIssuesMap[selected.path] ?? null : null;
+  const selectedGithubRepoResponse = selected ? githubReposMap[selected.path] ?? null : null;
+  const selectedGithubIssues = selectedGithubIssuesResponse?.records ?? [];
+  const selectedGithubRepo = selectedGithubRepoResponse?.record ?? null;
+  const selectedGithubIssuesRefreshing = selected ? githubIssuesRefreshing.has(selected.path) : false;
+  const selectedGithubRepoRefreshing = selected ? githubRepoRefreshing.has(selected.path) : false;
   const selectedGitSummary = selected ? gitSummaries[selected.path] ?? null : null;
   const selectedProjectAgents = selected ? projectAgents[selected.path] ?? null : null;
   const selectedContextOk = selected ? countPresent(selected) : 0;
@@ -1075,6 +1170,12 @@ function App() {
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-4" />
           <div className="truncate text-sm text-muted-foreground">{view === "dashboard" ? "Dashboard" : view === "agent-library" ? "Agent Library" : selected?.name}</div>
+          <div className="ml-auto">
+            <Button size="sm" variant="outline" onClick={() => refreshLocalOverview(false)} disabled={overviewRefreshing}>
+              <RefreshCw className={cn("size-3.5", overviewRefreshing && "animate-spin")} />
+              Refresh local
+            </Button>
+          </div>
         </header>
         <section className="min-h-0 flex-1 overflow-y-auto p-6">
         {view === "dashboard" || view === "agent-library" ? (
@@ -1103,7 +1204,7 @@ function App() {
                   <h2 className="truncate text-3xl font-semibold tracking-tight">{selected.name}</h2>
                   <p className="mt-1 truncate text-sm text-muted-foreground">{selected.path}</p>
                   <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">
-                    {selectedGithubRepo?.description ?? (githubRepoLoading ? "Loading GitHub repository metadata…" : selected.github_issues.repo ?? "No GitHub repository metadata observed.")}
+                    {selectedGithubRepo?.description ?? selected.github_issues.repo ?? "No GitHub repository metadata observed."}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Badge variant="secondary">{selectedContextOk}/{selected.context_files.length} context</Badge>
@@ -1126,19 +1227,19 @@ function App() {
             <TabsList><TabsTrigger value="overview">Projects</TabsTrigger><TabsTrigger value="agent-inbox">Agent Inbox</TabsTrigger><TabsTrigger value="github">GitHub</TabsTrigger></TabsList>
             <TabsContent value="overview" className="mt-4"><DashboardProjectGrid projects={filteredProjects} issueCountsByPath={issueCountsByPath} onSelect={(project) => { setSelectedPath(project.path); setView("project"); }} /></TabsContent>
             <TabsContent value="agent-inbox" className="mt-4"><AgentInboxDashboard records={overview.inbox_records} selectedProjectPath={selected?.path ?? null} /></TabsContent>
-            <TabsContent value="github" className="mt-4"><GitHubIssuesDashboard issues={githubIssues} selectedProjectPath={selected?.path ?? null} /></TabsContent>
+            <TabsContent value="github" className="mt-4"><GitHubIssuesDashboard issues={allGithubIssues} selectedProjectPath={selected?.path ?? null} /></TabsContent>
           </Tabs>
         ) : view === "agent-library" ? (
           <AgentLibraryPanel library={overview.agent_library} />
         ) : selected ? (
           <Tabs value={projectTab} onValueChange={(value) => setProjectTab(value as ProjectTab)}>
             <TabsList><TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="agent-inbox">Agent Inbox</TabsTrigger><TabsTrigger value="context">Context</TabsTrigger><TabsTrigger value="memories">Memories</TabsTrigger><TabsTrigger value="agents">Agents</TabsTrigger><TabsTrigger value="github">GitHub</TabsTrigger></TabsList>
-            <TabsContent value="overview" className="mt-4 grid gap-4 lg:grid-cols-2"><GitHubRepoPanel project={selected} repoData={selectedGithubRepo} loading={githubRepoLoading} /><ReadmePanel project={selected} /><SuggestedActionsPanel project={selected} inboxRecords={selectedInboxRecords} issueCount={selectedGithubIssues.length} /><GitHealthPanel summary={selectedGitSummary} /><InboxPanel project={selected} /><GitHubIssuesPanel project={selected} issueCount={issueCountsByPath.get(selected.path) ?? 0} loading={githubLoading} /></TabsContent>
+            <TabsContent value="overview" className="mt-4 grid gap-4 lg:grid-cols-2"><GitHubRepoPanel project={selected} repoData={selectedGithubRepo} freshness={selectedGithubRepoResponse?.freshness} refreshing={selectedGithubRepoRefreshing} onRefresh={() => handleRefreshGithubRepo(selected.path)} /><ReadmePanel project={selected} /><SuggestedActionsPanel project={selected} inboxRecords={selectedInboxRecords} issueCount={selectedGithubIssues.length} /><GitHealthPanel summary={selectedGitSummary} /><InboxPanel project={selected} /><GitHubIssuesPanel project={selected} issueCount={issueCountsByPath.get(selected.path) ?? 0} freshness={selectedGithubIssuesResponse?.freshness} refreshing={selectedGithubIssuesRefreshing} onRefresh={() => handleRefreshGithubIssues(selected.path)} /></TabsContent>
             <TabsContent value="agent-inbox" className="mt-4"><AgentInboxDashboard records={selectedInboxRecords} selectedProjectPath={selected.path} /></TabsContent>
             <TabsContent value="context" className="mt-4"><ContextPanel project={selected} /></TabsContent>
             <TabsContent value="memories" className="mt-4"><MemoriesPanel agents={selectedProjectAgents} /></TabsContent>
             <TabsContent value="agents" className="mt-4"><AgentsPanel agents={selectedProjectAgents} /></TabsContent>
-            <TabsContent value="github" className="mt-4 grid gap-4"><GitHubRepoPanel project={selected} repoData={selectedGithubRepo} loading={githubRepoLoading} /><GitHubIssuesDashboard issues={selectedGithubIssues} selectedProjectPath={selected.path} /></TabsContent>
+            <TabsContent value="github" className="mt-4 grid gap-4"><GitHubRepoPanel project={selected} repoData={selectedGithubRepo} freshness={selectedGithubRepoResponse?.freshness} refreshing={selectedGithubRepoRefreshing} onRefresh={() => handleRefreshGithubRepo(selected.path)} /><GitHubIssuesPanel project={selected} issueCount={selectedGithubIssues.length} freshness={selectedGithubIssuesResponse?.freshness} refreshing={selectedGithubIssuesRefreshing} onRefresh={() => handleRefreshGithubIssues(selected.path)} /><GitHubIssuesDashboard issues={selectedGithubIssues} selectedProjectPath={selected.path} /></TabsContent>
           </Tabs>
         ) : null}
 

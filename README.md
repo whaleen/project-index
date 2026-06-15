@@ -47,6 +47,8 @@ cd src-tauri && cargo check
 
 The desktop companion is the rich UI discovery surface for project-index. Use it to iterate on project dashboards, context health, agent sessions, skills/MCP, GitHub issue/repo views, Agent Inbox observations, and Agent Library inventory before porting proven views back to the TUI.
 
+Refresh architecture is defined in [`docs/adr/0003-observation-refresh-architecture.md`](./docs/adr/0003-observation-refresh-architecture.md): local observations should be filesystem-watch driven and bounded; GitHub data should be stale-while-revalidate with visible `last updated` metadata and explicit refresh buttons.
+
 Desktop pages:
 
 | Page | What it shows |

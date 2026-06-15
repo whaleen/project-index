@@ -3,6 +3,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -47,6 +48,33 @@ struct GitHubIssueRecord {
     labels: Vec<String>,
     url: Option<String>,
     updated_at: Option<String>,
+}
+
+/// Freshness metadata attached to GitHub responses so the frontend can
+/// display "last updated" and stale state without firing live calls on
+/// every navigation event.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct GitHubFreshness {
+    /// Unix epoch seconds when the cache entry was last fetched from GitHub.
+    fetched_at: u64,
+    /// Whether the data exceeds its TTL and should be considered stale.
+    stale: bool,
+    /// "github-cache" | "github-live"
+    source: String,
+    /// Last fetch error, if any.
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct GitHubRepoResponse {
+    record: Option<GitHubRepoRecord>,
+    freshness: GitHubFreshness,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct GitHubIssuesResponse {
+    records: Vec<GitHubIssueRecord>,
+    freshness: GitHubFreshness,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -824,13 +852,150 @@ fn fetch_github_issue_records(path: &Path) -> Result<Vec<GitHubIssueRecord>, Str
     Ok(records)
 }
 
+const ISSUES_TTL_SECS: u64 = 15 * 60; // 15 minutes
+const REPO_TTL_SECS: u64 = 60 * 60; // 60 minutes
+const GITHUB_MIN_CALL_INTERVAL: Duration = Duration::from_millis(750);
+
+static GITHUB_REMOTE_GATE: OnceLock<Mutex<()>> = OnceLock::new();
+static GITHUB_LAST_CALL_STARTED: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+
+fn run_github_remote_call<T>(call: impl FnOnce() -> T) -> T {
+    let _gate = GITHUB_REMOTE_GATE
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    {
+        let mut last_started = GITHUB_LAST_CALL_STARTED
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(last) = *last_started {
+            let elapsed = last.elapsed();
+            if elapsed < GITHUB_MIN_CALL_INTERVAL {
+                thread::sleep(GITHUB_MIN_CALL_INTERVAL - elapsed);
+            }
+        }
+        *last_started = Some(Instant::now());
+    }
+
+    call()
+}
+
+fn issues_freshness(fetched_at: u64, error: Option<String>, source: &str) -> GitHubFreshness {
+    GitHubFreshness {
+        fetched_at,
+        stale: now_epoch_secs().saturating_sub(fetched_at) > ISSUES_TTL_SECS,
+        source: source.to_string(),
+        error,
+    }
+}
+
+fn repo_freshness(fetched_at: u64, error: Option<String>, source: &str) -> GitHubFreshness {
+    GitHubFreshness {
+        fetched_at,
+        stale: now_epoch_secs().saturating_sub(fetched_at) > REPO_TTL_SECS,
+        source: source.to_string(),
+        error,
+    }
+}
+
+/// Return cached issues (if any) without hitting GitHub. Never auto-fetches.
+fn query_github_issues_cached(path: &Path) -> GitHubIssuesResponse {
+    let Some(repo) = github_repo_for_project(path) else {
+        return GitHubIssuesResponse::default();
+    };
+    let cache = load_github_issues_cache();
+    if let Some(entry) = cache.get(&repo) {
+        return GitHubIssuesResponse {
+            records: contextualize_issue_records(entry.issues.clone(), path, &repo),
+            freshness: issues_freshness(entry.fetched_at, None, "github-cache"),
+        };
+    }
+    GitHubIssuesResponse {
+        records: vec![],
+        freshness: GitHubFreshness { source: "github-cache".into(), ..Default::default() },
+    }
+}
+
+/// Return cached repo record (if any) without hitting GitHub. Never auto-fetches.
+fn query_github_repo_cached(path: &Path) -> GitHubRepoResponse {
+    let Some(repo) = github_repo_for_project(path) else {
+        return GitHubRepoResponse::default();
+    };
+    let cache = load_github_repo_cache();
+    if let Some(entry) = cache.get(&repo) {
+        return GitHubRepoResponse {
+            record: Some(contextualize_repo_record(entry.repo.clone(), path, &repo)),
+            freshness: repo_freshness(entry.fetched_at, None, "github-cache"),
+        };
+    }
+    GitHubRepoResponse {
+        record: None,
+        freshness: GitHubFreshness { source: "github-cache".into(), ..Default::default() },
+    }
+}
+
+/// Force-fetch issues from GitHub and update cache.
+fn refresh_github_issues_live(path: &Path) -> GitHubIssuesResponse {
+    let Some(repo) = github_repo_for_project(path) else {
+        return GitHubIssuesResponse::default();
+    };
+    match run_github_remote_call(|| fetch_github_issue_records(path)) {
+        Ok(records) => {
+            let fetched_at = load_github_issues_cache()
+                .get(&repo)
+                .map(|e| e.fetched_at)
+                .unwrap_or_else(now_epoch_secs);
+            GitHubIssuesResponse {
+                records,
+                freshness: issues_freshness(fetched_at, None, "github-live"),
+            }
+        }
+        Err(e) => {
+            let cached = query_github_issues_cached(path);
+            GitHubIssuesResponse {
+                freshness: issues_freshness(cached.freshness.fetched_at, Some(e), "github-cache"),
+                ..cached
+            }
+        }
+    }
+}
+
+/// Force-fetch repo record from GitHub and update cache.
+fn refresh_github_repo_live(path: &Path) -> GitHubRepoResponse {
+    let Some(repo) = github_repo_for_project(path) else {
+        return GitHubRepoResponse::default();
+    };
+    match run_github_remote_call(|| fetch_github_repo_record(path)) {
+        Ok(record) => {
+            let fetched_at = load_github_repo_cache()
+                .get(&repo)
+                .map(|e| e.fetched_at)
+                .unwrap_or_else(now_epoch_secs);
+            GitHubRepoResponse {
+                record: Some(record),
+                freshness: repo_freshness(fetched_at, None, "github-live"),
+            }
+        }
+        Err(e) => {
+            let cached = query_github_repo_cached(path);
+            GitHubRepoResponse {
+                freshness: repo_freshness(cached.freshness.fetched_at, Some(e), "github-cache"),
+                ..cached
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
 fn load_github_issue_records(path: &Path) -> Result<Vec<GitHubIssueRecord>, String> {
     let Some(repo) = github_repo_for_project(path) else {
         return Ok(Vec::new());
     };
     let cache = load_github_issues_cache();
     if let Some(entry) = cache.get(&repo) {
-        if now_epoch_secs().saturating_sub(entry.fetched_at) < 15 * 60 {
+        if now_epoch_secs().saturating_sub(entry.fetched_at) < ISSUES_TTL_SECS {
             return Ok(contextualize_issue_records(
                 entry.issues.clone(),
                 path,
@@ -933,13 +1098,14 @@ fn fetch_github_repo_record(path: &Path) -> Result<GitHubRepoRecord, String> {
     Ok(record)
 }
 
+#[allow(dead_code)]
 fn load_github_repo_record(path: &Path) -> Result<GitHubRepoRecord, String> {
     let Some(repo) = github_repo_for_project(path) else {
         return Err("No GitHub remote".to_string());
     };
     let cache = load_github_repo_cache();
     if let Some(entry) = cache.get(&repo) {
-        let fresh = now_epoch_secs().saturating_sub(entry.fetched_at) < 15 * 60;
+        let fresh = now_epoch_secs().saturating_sub(entry.fetched_at) < REPO_TTL_SECS;
         let has_visuals =
             entry.repo.repo_image_url.is_some() || entry.repo.local_icon_path.is_some();
         if fresh && has_visuals {
@@ -1399,14 +1565,30 @@ fn inspect_inbox(path: String) -> Vec<AgentInboxRecord> {
     load_inbox_records(Path::new(&path))
 }
 
+/// Return cached GitHub issues for a project path. Never fires a live call.
+/// Use refresh_github_issues to force a live fetch.
 #[tauri::command]
-fn inspect_github_issues(path: String) -> Vec<GitHubIssueRecord> {
-    load_github_issue_records(Path::new(&path)).unwrap_or_default()
+fn inspect_github_issues(path: String) -> GitHubIssuesResponse {
+    query_github_issues_cached(Path::new(&path))
 }
 
+/// Return cached GitHub repo record for a project path. Never fires a live call.
+/// Use refresh_github_repo to force a live fetch.
 #[tauri::command]
-fn inspect_github_repo(path: String) -> Option<GitHubRepoRecord> {
-    load_github_repo_record(Path::new(&path)).ok()
+fn inspect_github_repo(path: String) -> GitHubRepoResponse {
+    query_github_repo_cached(Path::new(&path))
+}
+
+/// Force-refresh GitHub issues from the API and update the cache.
+#[tauri::command]
+fn refresh_github_issues(path: String) -> GitHubIssuesResponse {
+    refresh_github_issues_live(Path::new(&path))
+}
+
+/// Force-refresh GitHub repo metadata from the API and update the cache.
+#[tauri::command]
+fn refresh_github_repo(path: String) -> GitHubRepoResponse {
+    refresh_github_repo_live(Path::new(&path))
 }
 
 #[tauri::command]
@@ -1432,6 +1614,8 @@ pub fn run() {
             inspect_inbox,
             inspect_github_issues,
             inspect_github_repo,
+            refresh_github_issues,
+            refresh_github_repo,
             inspect_git_summary,
             inspect_agent_library,
             inspect_project_agents

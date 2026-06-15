@@ -134,6 +134,7 @@ project-index observes local agent inbox installations as workflow state. Instal
 
 - ✅ Split `cli/src/lib.rs` by concern: config, project scan, agent readers, git/GitHub readers, app state, tab renderers, key handlers, CLI/MCP.
 - 📋 Add reusable read-only core boundary shared by `cli/` and `app/`
+- 📋 Desktop app refresh must follow `docs/adr/0003-observation-refresh-architecture.md`: backend-owned observation store, local filesystem watchers, bounded refresh queues, stale-while-revalidate GitHub data, visible freshness metadata, and no navigation-triggered GitHub stampedes.
 - 📋 Keep native agent storage docs current under `docs/agents/`.
 - 📋 Add regression checks for read-only behavior: no UI/CLI/MCP/app path should write project files.
 
