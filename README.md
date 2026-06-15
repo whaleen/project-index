@@ -49,6 +49,8 @@ The desktop companion is the rich UI discovery surface for project-index. Use it
 
 Refresh architecture is defined in [`docs/adr/0003-observation-refresh-architecture.md`](./docs/adr/0003-observation-refresh-architecture.md): local observations should be filesystem-watch driven and bounded; GitHub data should be stale-while-revalidate with visible `last updated` metadata and explicit refresh buttons.
 
+Local desktop storage is defined in [`docs/adr/0004-local-observation-storage.md`](./docs/adr/0004-local-observation-storage.md): project-index uses a local SQLite observation cache at `~/.project-index/project-index.sqlite`, while project files, native agent files, and GitHub remain the source of truth.
+
 Desktop pages:
 
 | Page | What it shows |

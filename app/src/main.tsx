@@ -239,6 +239,13 @@ type ProjectAgentsOverview = {
   sessions: AgentSessionRecord[];
 };
 
+type StorageOverview = {
+  path: string;
+  observations: number;
+  github_repos: number;
+  github_issues: number;
+};
+
 type AppOverview = {
   contract: string;
   projects_root: string;
@@ -952,6 +959,7 @@ function App() {
   const [gitLoadedPaths, setGitLoadedPaths] = React.useState<string[]>([]);
   const [projectAgents, setProjectAgents] = React.useState<Record<string, ProjectAgentsOverview>>({});
   const [agentsLoadedPaths, setAgentsLoadedPaths] = React.useState<string[]>([]);
+  const [storageOverview, setStorageOverview] = React.useState<StorageOverview | null>(null);
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
   const [projectSearch, setProjectSearch] = React.useState("");
   const [view, setView] = React.useState<"dashboard" | "agent-library" | "project">("dashboard");
@@ -991,6 +999,7 @@ function App() {
       .finally(() => {
         overviewRefreshInFlight.current = false;
         setOverviewRefreshing(false);
+        invoke<StorageOverview>("inspect_storage").then(setStorageOverview).catch(() => {});
         if (pendingOverviewRefresh.current) {
           pendingOverviewRefresh.current = false;
           window.setTimeout(() => refreshLocalOverview(false), 0);
@@ -1000,6 +1009,7 @@ function App() {
 
   React.useEffect(() => {
     refreshLocalOverview(true);
+    invoke<StorageOverview>("inspect_storage").then(setStorageOverview).catch(() => {});
   }, [refreshLocalOverview]);
 
   React.useEffect(() => {
@@ -1268,6 +1278,7 @@ function App() {
                 <Badge variant="secondary">{inboxProjects} inboxes</Badge>
                 <Badge variant="outline">{activeInbox} agent inbox</Badge>
                 <Badge variant="outline">{openIssues} issues</Badge>
+                {storageOverview ? <Badge variant="outline" title={storageOverview.path}>{storageOverview.observations} cached observations</Badge> : null}
               </div>
             </CardContent>
           </Card>

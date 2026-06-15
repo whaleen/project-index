@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize)]
@@ -231,6 +232,14 @@ struct ProjectAgentsOverview {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct StorageOverview {
+    path: String,
+    observations: u64,
+    github_repos: u64,
+    github_issues: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct LocalObservationEvent {
     reason: String,
     observed_at: u64,
@@ -262,6 +271,113 @@ fn now_epoch_secs() -> u64 {
         .as_secs()
 }
 
+fn sqlite_cache_path() -> PathBuf {
+    home_dir()
+        .unwrap_or_default()
+        .join(".project-index")
+        .join("project-index.sqlite")
+}
+
+fn open_observation_db() -> rusqlite::Result<Connection> {
+    let path = sqlite_cache_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let conn = Connection::open(path)?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS observations (
+            resource_key TEXT PRIMARY KEY,
+            resource_type TEXT NOT NULL,
+            project_path TEXT,
+            source TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            observed_at INTEGER NOT NULL,
+            stale_after INTEGER,
+            last_error TEXT
+        );
+        CREATE TABLE IF NOT EXISTS github_repos (
+            repo TEXT PRIMARY KEY,
+            fetched_at INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            last_error TEXT
+        );
+        CREATE TABLE IF NOT EXISTS github_issues (
+            repo TEXT PRIMARY KEY,
+            fetched_at INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            last_error TEXT
+        );
+        PRAGMA user_version = 1;",
+    )?;
+    Ok(conn)
+}
+
+fn sqlite_count(conn: &Connection, table: &str) -> u64 {
+    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+        row.get::<_, i64>(0)
+    })
+    .unwrap_or(0)
+    .max(0) as u64
+}
+
+fn load_storage_overview() -> StorageOverview {
+    let path = sqlite_cache_path();
+    let Ok(conn) = open_observation_db() else {
+        return StorageOverview {
+            path: path.display().to_string(),
+            observations: 0,
+            github_repos: 0,
+            github_issues: 0,
+        };
+    };
+    StorageOverview {
+        path: path.display().to_string(),
+        observations: sqlite_count(&conn, "observations"),
+        github_repos: sqlite_count(&conn, "github_repos"),
+        github_issues: sqlite_count(&conn, "github_issues"),
+    }
+}
+
+fn store_observation_snapshot<T: Serialize>(
+    resource_key: &str,
+    resource_type: &str,
+    project_path: Option<&str>,
+    source: &str,
+    payload: &T,
+    observed_at: u64,
+    stale_after: Option<u64>,
+    last_error: Option<&str>,
+) {
+    let Ok(conn) = open_observation_db() else {
+        return;
+    };
+    let Ok(payload_json) = serde_json::to_string(payload) else {
+        return;
+    };
+    let _ = conn.execute(
+        "INSERT INTO observations (resource_key, resource_type, project_path, source, payload_json, observed_at, stale_after, last_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(resource_key) DO UPDATE SET
+            resource_type=excluded.resource_type,
+            project_path=excluded.project_path,
+            source=excluded.source,
+            payload_json=excluded.payload_json,
+            observed_at=excluded.observed_at,
+            stale_after=excluded.stale_after,
+            last_error=excluded.last_error",
+        params![
+            resource_key,
+            resource_type,
+            project_path,
+            source,
+            payload_json,
+            observed_at as i64,
+            stale_after.map(|v| v as i64),
+            last_error,
+        ],
+    );
+}
+
 fn github_issues_cache_path() -> PathBuf {
     home_dir()
         .unwrap_or_default()
@@ -278,38 +394,132 @@ fn github_repo_cache_path() -> PathBuf {
         .join("github-repos.json")
 }
 
-fn load_github_issues_cache() -> GitHubIssuesCache {
+fn load_github_issues_cache_from_json() -> GitHubIssuesCache {
     fs::read_to_string(github_issues_cache_path())
         .ok()
         .and_then(|content| serde_json::from_str(&content).ok())
         .unwrap_or_default()
 }
 
-fn save_github_issues_cache(cache: &GitHubIssuesCache) {
-    let path = github_issues_cache_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Ok(json) = serde_json::to_string_pretty(cache) {
-        let _ = fs::write(path, json);
-    }
-}
-
-fn load_github_repo_cache() -> GitHubRepoCache {
+fn load_github_repos_cache_from_json() -> GitHubRepoCache {
     fs::read_to_string(github_repo_cache_path())
         .ok()
         .and_then(|content| serde_json::from_str(&content).ok())
         .unwrap_or_default()
 }
 
+fn load_github_issues_cache() -> GitHubIssuesCache {
+    let Ok(conn) = open_observation_db() else {
+        return load_github_issues_cache_from_json();
+    };
+    let mut cache = GitHubIssuesCache::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT repo, fetched_at, payload_json FROM github_issues") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            let repo: String = row.get(0)?;
+            let fetched_at: i64 = row.get(1)?;
+            let payload_json: String = row.get(2)?;
+            Ok((repo, fetched_at, payload_json))
+        }) {
+            for row in rows.flatten() {
+                if let Ok(issues) = serde_json::from_str::<Vec<GitHubIssueRecord>>(&row.2) {
+                    cache.insert(
+                        row.0,
+                        GitHubIssuesCacheEntry {
+                            fetched_at: row.1.max(0) as u64,
+                            issues,
+                        },
+                    );
+                }
+            }
+        }
+    }
+    if cache.is_empty() {
+        let json_cache = load_github_issues_cache_from_json();
+        if !json_cache.is_empty() {
+            save_github_issues_cache(&json_cache);
+            return json_cache;
+        }
+    }
+    cache
+}
+
+fn save_github_issues_cache(cache: &GitHubIssuesCache) {
+    let Ok(mut conn) = open_observation_db() else {
+        return;
+    };
+    if let Ok(tx) = conn.transaction() {
+        for (repo, entry) in cache {
+            if let Ok(payload_json) = serde_json::to_string(&entry.issues) {
+                let _ = tx.execute(
+                    "INSERT INTO github_issues (repo, fetched_at, payload_json, last_error)
+                     VALUES (?1, ?2, ?3, NULL)
+                     ON CONFLICT(repo) DO UPDATE SET
+                        fetched_at=excluded.fetched_at,
+                        payload_json=excluded.payload_json,
+                        last_error=NULL",
+                    params![repo, entry.fetched_at as i64, payload_json],
+                );
+            }
+        }
+        let _ = tx.commit();
+    };
+}
+
+fn load_github_repo_cache() -> GitHubRepoCache {
+    let Ok(conn) = open_observation_db() else {
+        return load_github_repos_cache_from_json();
+    };
+    let mut cache = GitHubRepoCache::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT repo, fetched_at, payload_json FROM github_repos") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            let repo: String = row.get(0)?;
+            let fetched_at: i64 = row.get(1)?;
+            let payload_json: String = row.get(2)?;
+            Ok((repo, fetched_at, payload_json))
+        }) {
+            for row in rows.flatten() {
+                if let Ok(repo_record) = serde_json::from_str::<GitHubRepoRecord>(&row.2) {
+                    cache.insert(
+                        row.0,
+                        GitHubRepoCacheEntry {
+                            fetched_at: row.1.max(0) as u64,
+                            repo: repo_record,
+                        },
+                    );
+                }
+            }
+        }
+    }
+    if cache.is_empty() {
+        let json_cache = load_github_repos_cache_from_json();
+        if !json_cache.is_empty() {
+            save_github_repo_cache(&json_cache);
+            return json_cache;
+        }
+    }
+    cache
+}
+
 fn save_github_repo_cache(cache: &GitHubRepoCache) {
-    let path = github_repo_cache_path();
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Ok(json) = serde_json::to_string_pretty(cache) {
-        let _ = fs::write(path, json);
-    }
+    let Ok(mut conn) = open_observation_db() else {
+        return;
+    };
+    if let Ok(tx) = conn.transaction() {
+        for (repo, entry) in cache {
+            if let Ok(payload_json) = serde_json::to_string(&entry.repo) {
+                let _ = tx.execute(
+                    "INSERT INTO github_repos (repo, fetched_at, payload_json, last_error)
+                     VALUES (?1, ?2, ?3, NULL)
+                     ON CONFLICT(repo) DO UPDATE SET
+                        fetched_at=excluded.fetched_at,
+                        payload_json=excluded.payload_json,
+                        last_error=NULL",
+                    params![repo, entry.fetched_at as i64, payload_json],
+                );
+            }
+        }
+        let _ = tx.commit();
+    };
 }
 
 fn default_projects_root() -> PathBuf {
@@ -897,6 +1107,16 @@ fn remember_app_overview(overview: &AppOverview) {
     {
         *store = Some(overview.clone());
     }
+    store_observation_snapshot(
+        "AppOverview",
+        "AppOverview",
+        None,
+        &overview.freshness.source,
+        overview,
+        overview.freshness.observed_at,
+        None,
+        None,
+    );
 }
 
 fn remember_project_observation(project: &ProjectObservation) {
@@ -906,6 +1126,16 @@ fn remember_project_observation(project: &ProjectObservation) {
     {
         store.insert(project.path.clone(), project.clone());
     }
+    store_observation_snapshot(
+        &format!("ProjectLocal:{}", project.path),
+        "ProjectLocal",
+        Some(&project.path),
+        &project.freshness.source,
+        project,
+        project.freshness.observed_at,
+        None,
+        None,
+    );
 }
 
 fn run_github_remote_call<T>(call: impl FnOnce() -> T) -> T {
@@ -1898,6 +2128,11 @@ fn inspect_project_agents(path: String) -> ProjectAgentsOverview {
     run_local_observation_call(|| load_project_agents_overview(Path::new(&path)))
 }
 
+#[tauri::command]
+fn inspect_storage() -> StorageOverview {
+    load_storage_overview()
+}
+
 fn watch_if_exists(watcher: &mut RecommendedWatcher, path: PathBuf, mode: RecursiveMode) {
     if path.exists() {
         let _ = watcher.watch(&path, mode);
@@ -2039,7 +2274,8 @@ pub fn run() {
             refresh_github_repo,
             inspect_git_summary,
             inspect_agent_library,
-            inspect_project_agents
+            inspect_project_agents,
+            inspect_storage
         ])
         .run(tauri::generate_context!())
         .expect("error while running project-index desktop app");

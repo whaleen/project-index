@@ -27,11 +27,11 @@
 - Nerd Font glyphs have no fallback
 - Codex session scan walks all historical session dirs on each project load
 - Gemini summary viewer not yet implemented
-- Desktop local refresh now has a lightweight filesystem watcher, targeted project refresh events with backend-observed project snapshots, an in-memory observation store, and 60s polling fallback. It still lacks a generalized per-resource snapshot API.
+- Desktop local refresh now has a lightweight filesystem watcher, targeted project refresh events with backend-observed project snapshots, an in-memory observation store, a local SQLite observation cache at `~/.project-index/project-index.sqlite`, a basic storage inspector/count badge, and 60s polling fallback.
 
 ## What's Next
 
-1. Continue ADR 0003 polish: generalize the in-memory observation store into a per-resource snapshot API and add richer local freshness UI. GitHub cached inspection, freshness metadata, manual refresh buttons, serialized remote calls, lightweight local watcher events, backend-observed targeted project refreshes, watcher discovery for newly-added repos, bounded local observation serialization, and frontend local-refresh coalescing are in place.
+1. Continue ADR 0003/0004 polish: expand the storage inspector and add richer local freshness UI. GitHub caches and local observation snapshots are now persisted to SQLite with JSON cache fallback/migration for existing GitHub cache files.
 2. Agent inbox observation: refine the cross-project inbox dashboard, record detail view, filters, and copyable agent prompts
 3. Global agent view: surface `~/.claude`, `~/.codex`, `~/.gemini`, `~/.pi/agent`, `~/.agents` as a system-level tab
 4. Improve sessions: cross-project view, faster Codex scan, Gemini summaries
