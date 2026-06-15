@@ -11,13 +11,13 @@ use base64::Engine;
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct ContextFileObservation {
     path: String,
     present: bool,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 struct InboxSummary {
     installed: bool,
     docs_present: bool,
@@ -29,7 +29,7 @@ struct InboxSummary {
     latest_body: Option<String>,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 struct GitHubIssueSummary {
     repo: Option<String>,
     available: bool,
@@ -115,7 +115,7 @@ struct GitHubRepoCacheEntry {
 type GitHubIssuesCache = BTreeMap<String, GitHubIssuesCacheEntry>;
 type GitHubRepoCache = BTreeMap<String, GitHubRepoCacheEntry>;
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct AgentInboxRecord {
     project_name: String,
     project_path: String,
@@ -133,7 +133,7 @@ struct AgentInboxRecord {
     agent_notes: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct ProjectVisuals {
     org_avatar_url: Option<String>,
     repo_image_url: Option<String>,
@@ -141,7 +141,13 @@ struct ProjectVisuals {
     local_icon_url: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+struct LocalFreshness {
+    observed_at: u64,
+    source: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct ProjectObservation {
     name: String,
     path: String,
@@ -152,9 +158,10 @@ struct ProjectObservation {
     readme: Option<String>,
     latest_commit_epoch: Option<u64>,
     latest_commit: Option<String>,
+    freshness: LocalFreshness,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct GitSummary {
     branch: Option<String>,
     dirty_count: u32,
@@ -163,7 +170,7 @@ struct GitSummary {
     last_commit: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct LibraryAsset {
     kind: String,
     name: String,
@@ -173,7 +180,7 @@ struct LibraryAsset {
     body: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct AgentLibraryOverview {
     root: String,
     prompts: Vec<LibraryAsset>,
@@ -181,7 +188,7 @@ struct AgentLibraryOverview {
     skills: Vec<LibraryAsset>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct AgentMemoryFile {
     agent: String,
     name: String,
@@ -189,7 +196,7 @@ struct AgentMemoryFile {
     content: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct ProjectSkillRecord {
     name: String,
     scope: String,
@@ -199,14 +206,14 @@ struct ProjectSkillRecord {
     description: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct McpServerRecord {
     name: String,
     command: String,
     args: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct AgentSessionRecord {
     agent: String,
     id: Option<String>,
@@ -215,7 +222,7 @@ struct AgentSessionRecord {
     path: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct ProjectAgentsOverview {
     memories: Vec<AgentMemoryFile>,
     skills: Vec<ProjectSkillRecord>,
@@ -229,10 +236,11 @@ struct LocalObservationEvent {
     observed_at: u64,
     paths: Vec<String>,
     project_paths: Vec<String>,
+    project_observations: Vec<ProjectObservation>,
     needs_full_rescan: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct AppOverview {
     contract: &'static str,
     projects_root: String,
@@ -240,6 +248,7 @@ struct AppOverview {
     inbox_records: Vec<AgentInboxRecord>,
     github_issue_records: Vec<GitHubIssueRecord>,
     agent_library: AgentLibraryOverview,
+    freshness: LocalFreshness,
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -868,6 +877,36 @@ const GITHUB_MIN_CALL_INTERVAL: Duration = Duration::from_millis(750);
 
 static GITHUB_REMOTE_GATE: OnceLock<Mutex<()>> = OnceLock::new();
 static GITHUB_LAST_CALL_STARTED: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+static LOCAL_OBSERVATION_GATE: OnceLock<Mutex<()>> = OnceLock::new();
+static APP_OBSERVATION_STORE: OnceLock<Mutex<Option<AppOverview>>> = OnceLock::new();
+static PROJECT_OBSERVATION_STORE: OnceLock<Mutex<BTreeMap<String, ProjectObservation>>> =
+    OnceLock::new();
+
+fn run_local_observation_call<T>(call: impl FnOnce() -> T) -> T {
+    let _gate = LOCAL_OBSERVATION_GATE
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    call()
+}
+
+fn remember_app_overview(overview: &AppOverview) {
+    if let Ok(mut store) = APP_OBSERVATION_STORE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    {
+        *store = Some(overview.clone());
+    }
+}
+
+fn remember_project_observation(project: &ProjectObservation) {
+    if let Ok(mut store) = PROJECT_OBSERVATION_STORE
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
+        .lock()
+    {
+        store.insert(project.path.clone(), project.clone());
+    }
+}
 
 fn run_github_remote_call<T>(call: impl FnOnce() -> T) -> T {
     let _gate = GITHUB_REMOTE_GATE
@@ -1738,8 +1777,8 @@ fn load_project_agents_overview(path: &Path) -> ProjectAgentsOverview {
     }
 }
 
-fn observe_project(path: &Path) -> ProjectObservation {
-    ProjectObservation {
+fn observe_project_with_source(path: &Path, source: &str) -> ProjectObservation {
+    let project = ProjectObservation {
         name: project_name(path),
         path: path.display().to_string(),
         context_files: context_files(path),
@@ -1750,11 +1789,20 @@ fn observe_project(path: &Path) -> ProjectObservation {
         latest_commit_epoch: git_output(path, &["log", "-1", "--format=%ct"])
             .and_then(|s| s.parse().ok()),
         latest_commit: git_output(path, &["log", "-1", "--pretty=%h %cr %s"]),
-    }
+        freshness: LocalFreshness {
+            observed_at: now_epoch_secs(),
+            source: source.to_string(),
+        },
+    };
+    remember_project_observation(&project);
+    project
 }
 
-#[tauri::command]
-fn app_overview() -> AppOverview {
+fn observe_project(path: &Path) -> ProjectObservation {
+    observe_project_with_source(path, "filesystem")
+}
+
+fn load_app_overview_with_source(source: &str) -> AppOverview {
     let root = default_projects_root();
     let repo_paths = scan_git_repos(&root);
     let projects = repo_paths
@@ -1778,19 +1826,30 @@ fn app_overview() -> AppOverview {
         .collect();
     github_issue_records.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
 
-    AppOverview {
+    let overview = AppOverview {
         contract: "read-only desktop companion; observe local project and agent state only",
         projects_root: root.display().to_string(),
         projects,
         inbox_records,
         github_issue_records,
         agent_library: load_agent_library(),
-    }
+        freshness: LocalFreshness {
+            observed_at: now_epoch_secs(),
+            source: source.to_string(),
+        },
+    };
+    remember_app_overview(&overview);
+    overview
+}
+
+#[tauri::command]
+fn app_overview() -> AppOverview {
+    run_local_observation_call(|| load_app_overview_with_source("command"))
 }
 
 #[tauri::command]
 fn inspect_project(path: String) -> ProjectObservation {
-    observe_project(Path::new(&path))
+    run_local_observation_call(|| observe_project_with_source(Path::new(&path), "command"))
 }
 
 #[tauri::command]
@@ -1826,17 +1885,17 @@ fn refresh_github_repo(path: String) -> GitHubRepoResponse {
 
 #[tauri::command]
 fn inspect_git_summary(path: String) -> GitSummary {
-    inspect_git_summary_inner(Path::new(&path))
+    run_local_observation_call(|| inspect_git_summary_inner(Path::new(&path)))
 }
 
 #[tauri::command]
 fn inspect_agent_library() -> AgentLibraryOverview {
-    load_agent_library()
+    run_local_observation_call(load_agent_library)
 }
 
 #[tauri::command]
 fn inspect_project_agents(path: String) -> ProjectAgentsOverview {
-    load_project_agents_overview(Path::new(&path))
+    run_local_observation_call(|| load_project_agents_overview(Path::new(&path)))
 }
 
 fn watch_if_exists(watcher: &mut RecommendedWatcher, path: PathBuf, mode: RecursiveMode) {
@@ -1845,11 +1904,29 @@ fn watch_if_exists(watcher: &mut RecommendedWatcher, path: PathBuf, mode: Recurs
     }
 }
 
+fn watch_repo_local_surfaces(watcher: &mut RecommendedWatcher, repo_path: &Path) {
+    watch_if_exists(
+        watcher,
+        repo_path.to_path_buf(),
+        RecursiveMode::NonRecursive,
+    );
+    watch_if_exists(watcher, repo_path.join(".git"), RecursiveMode::Recursive);
+    watch_if_exists(
+        watcher,
+        repo_path.join(".agent").join("inbox"),
+        RecursiveMode::Recursive,
+    );
+    watch_if_exists(watcher, repo_path.join(".claude"), RecursiveMode::Recursive);
+    watch_if_exists(watcher, repo_path.join(".agents"), RecursiveMode::Recursive);
+}
+
 fn start_local_observation_watcher(app_handle: tauri::AppHandle) {
     thread::spawn(move || {
         let root = default_projects_root();
         let repo_paths = scan_git_repos(&root);
-        let repo_paths_for_events = repo_paths.clone();
+        let root_for_scan = root.clone();
+        let mut repo_paths_for_events = repo_paths.clone();
+        let mut watched_repo_paths: BTreeSet<PathBuf> = repo_paths.iter().cloned().collect();
         let (tx, rx) = mpsc::channel();
         let Ok(mut watcher) = RecommendedWatcher::new(
             move |result| {
@@ -1862,31 +1939,12 @@ fn start_local_observation_watcher(app_handle: tauri::AppHandle) {
 
         watch_if_exists(&mut watcher, root, RecursiveMode::NonRecursive);
         for repo_path in repo_paths {
-            watch_if_exists(&mut watcher, repo_path.clone(), RecursiveMode::NonRecursive);
-            watch_if_exists(
-                &mut watcher,
-                repo_path.join(".git"),
-                RecursiveMode::Recursive,
-            );
-            watch_if_exists(
-                &mut watcher,
-                repo_path.join(".agent").join("inbox"),
-                RecursiveMode::Recursive,
-            );
-            watch_if_exists(
-                &mut watcher,
-                repo_path.join(".claude"),
-                RecursiveMode::Recursive,
-            );
-            watch_if_exists(
-                &mut watcher,
-                repo_path.join(".agents"),
-                RecursiveMode::Recursive,
-            );
+            watch_repo_local_surfaces(&mut watcher, &repo_path);
         }
 
         let mut pending_paths = BTreeSet::new();
         let mut last_event_at: Option<Instant> = None;
+        let mut last_repo_scan = Instant::now();
         loop {
             match rx.recv_timeout(Duration::from_millis(750)) {
                 Ok(Ok(event)) => {
@@ -1897,6 +1955,17 @@ fn start_local_observation_watcher(app_handle: tauri::AppHandle) {
                 }
                 Ok(Err(_)) => {}
                 Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if last_repo_scan.elapsed() >= Duration::from_secs(30) {
+                        last_repo_scan = Instant::now();
+                        let current_repo_paths = scan_git_repos(&root_for_scan);
+                        for repo_path in &current_repo_paths {
+                            if watched_repo_paths.insert(repo_path.clone()) {
+                                watch_repo_local_surfaces(&mut watcher, repo_path);
+                                pending_paths.insert(repo_path.display().to_string());
+                            }
+                        }
+                        repo_paths_for_events = current_repo_paths;
+                    }
                     if !pending_paths.is_empty()
                         && last_event_at
                             .map(|instant| instant.elapsed() >= Duration::from_millis(750))
@@ -1920,6 +1989,20 @@ fn start_local_observation_watcher(app_handle: tauri::AppHandle) {
                             }
                         }
                         pending_paths.clear();
+                        let project_paths_vec: Vec<String> = project_paths.into_iter().collect();
+                        let project_observations =
+                            if needs_full_rescan || project_paths_vec.len() > 6 {
+                                Vec::new()
+                            } else {
+                                run_local_observation_call(|| {
+                                    project_paths_vec
+                                        .iter()
+                                        .map(|path| {
+                                            observe_project_with_source(Path::new(path), "watcher")
+                                        })
+                                        .collect()
+                                })
+                            };
                         let _ = tauri::Emitter::emit(
                             &app_handle,
                             "observation://local-changed",
@@ -1927,7 +2010,8 @@ fn start_local_observation_watcher(app_handle: tauri::AppHandle) {
                                 reason: "filesystem".to_string(),
                                 observed_at: now_epoch_secs(),
                                 paths,
-                                project_paths: project_paths.into_iter().collect(),
+                                project_paths: project_paths_vec,
+                                project_observations,
                                 needs_full_rescan,
                             },
                         );

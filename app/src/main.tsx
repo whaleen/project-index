@@ -121,6 +121,7 @@ type LocalObservationEvent = {
   observed_at: number;
   paths: string[];
   project_paths: string[];
+  project_observations: ProjectObservation[];
   needs_full_rescan: boolean;
 };
 
@@ -159,6 +160,11 @@ type ProjectVisuals = {
   local_icon_url: string | null;
 };
 
+type LocalFreshness = {
+  observed_at: number;
+  source: string;
+};
+
 type ProjectObservation = {
   name: string;
   path: string;
@@ -169,6 +175,7 @@ type ProjectObservation = {
   readme: string | null;
   latest_commit_epoch: number | null;
   latest_commit: string | null;
+  freshness: LocalFreshness;
 };
 
 type GitSummary = {
@@ -239,6 +246,7 @@ type AppOverview = {
   inbox_records: AgentInboxRecord[];
   github_issue_records: GitHubIssueRecord[];
   agent_library: AgentLibraryOverview;
+  freshness: LocalFreshness;
 };
 
 const ACTIVE_STATUSES = ["new", "planned", "accepted", "in_progress"];
@@ -1023,7 +1031,14 @@ function App() {
     listen<LocalObservationEvent>("observation://local-changed", (event) => {
       setLastLocalObservationAt(event.payload.observed_at);
       if (document.visibilityState !== "visible") return;
-      if (event.payload.needs_full_rescan || event.payload.project_paths.length > 6) {
+      if (event.payload.project_observations.length > 0) {
+        setOverview((prev) => prev ? {
+          ...prev,
+          projects: prev.projects.map((item) => event.payload.project_observations.find((project) => project.path === item.path) ?? item)
+            .sort((a, b) => (b.latest_commit_epoch ?? 0) - (a.latest_commit_epoch ?? 0)),
+          freshness: { observed_at: event.payload.observed_at, source: "watcher" },
+        } : prev);
+      } else if (event.payload.needs_full_rescan || event.payload.project_paths.length > 6) {
         refreshLocalOverview(false);
       } else {
         refreshObservedProjects(event.payload.project_paths);
