@@ -289,7 +289,7 @@ const ACTIVE_STATUSES = ["new", "planned", "accepted", "in_progress"];
 const ALL_STATUSES = [...ACTIVE_STATUSES, "done", "wontfix"];
 
 type DashboardTab = "overview" | "agent-inbox" | "github";
-type ProjectTab = "overview" | "agent-inbox" | "context" | "memories" | "agents" | "github";
+type ProjectTab = "overview" | "work" | "context" | "github" | "agents" | "activity";
 
 function recordTitle(record: AgentInboxRecord) {
   return record.title || record.body.slice(0, 72) || record.id;
@@ -631,6 +631,21 @@ function AgentsPanel({ agents }: { agents: ProjectAgentsOverview | null }) {
       </ShellCard>
     </div>
   );
+}
+
+function AgentsWorkspace({ agents }: { agents: ProjectAgentsOverview | null }) {
+  return (
+    <div className="space-y-4">
+      <MemoriesPanel agents={agents} />
+      <AgentsPanel agents={agents} />
+    </div>
+  );
+}
+
+function ProjectReadmeSummary({ project }: { project: ProjectObservation }) {
+  if (!project.readme) return <EmptyState>No README observed for this project.</EmptyState>;
+  const excerpt = project.readme.replace(/^# .+$/m, "").trim().slice(0, 420);
+  return <p className="text-sm leading-6 text-muted-foreground">{excerpt}{project.readme.length > excerpt.length ? "…" : ""}</p>;
 }
 
 function InboxPanel({ project }: { project: ProjectObservation }) {
@@ -1230,7 +1245,7 @@ function App() {
 
   React.useEffect(() => {
     if (!overview || view !== "project" || !selectedPath || agentsLoadedPaths.includes(selectedPath)) return;
-    if (projectTab !== "memories" && projectTab !== "agents") return;
+    if (projectTab !== "agents") return;
     const path = selectedPath;
     let cancelled = false;
     async function loadProjectAgents() {
@@ -1277,6 +1292,7 @@ function App() {
   const selectedGithubRepo = selectedGithubRepoResponse?.record ?? null;
   const selectedGithubIssuesRefreshing = selected ? githubIssuesRefreshing.has(selected.path) : false;
   const selectedGithubRepoRefreshing = selected ? githubRepoRefreshing.has(selected.path) : false;
+  const selectedActivityRecords = selected ? activityRecords.filter((record) => record.project_path === selected.path || record.resource_key.includes(selected.path)) : [];
   const selectedGitSummary = selected ? gitSummaries[selected.path] ?? null : null;
   const selectedProjectAgents = selected ? projectAgents[selected.path] ?? null : null;
   const selectedContextOk = selected ? countPresent(selected) : 0;
@@ -1425,13 +1441,30 @@ function App() {
           <AgentLibraryPanel library={overview.agent_library} />
         ) : selected ? (
           <Tabs value={projectTab} onValueChange={(value) => setProjectTab(value as ProjectTab)}>
-            <TabsList><TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="agent-inbox">Agent Inbox</TabsTrigger><TabsTrigger value="context">Context</TabsTrigger><TabsTrigger value="memories">Memories</TabsTrigger><TabsTrigger value="agents">Agents</TabsTrigger><TabsTrigger value="github">GitHub</TabsTrigger></TabsList>
-            <TabsContent value="overview" className="mt-4 grid gap-4 lg:grid-cols-2"><GitHubRepoPanel project={selected} repoData={selectedGithubRepo} freshness={selectedGithubRepoResponse?.freshness} refreshing={selectedGithubRepoRefreshing} onRefresh={() => handleRefreshGithubRepo(selected.path)} /><ReadmePanel project={selected} /><SuggestedActionsPanel project={selected} inboxRecords={selectedInboxRecords} issueCount={selectedGithubIssues.length} /><GitHealthPanel summary={selectedGitSummary} /><InboxPanel project={selected} /><GitHubIssuesPanel project={selected} issueCount={issueCountsByPath.get(selected.path) ?? 0} freshness={selectedGithubIssuesResponse?.freshness} refreshing={selectedGithubIssuesRefreshing} onRefresh={() => handleRefreshGithubIssues(selected.path)} /></TabsContent>
-            <TabsContent value="agent-inbox" className="mt-4"><AgentInboxDashboard records={selectedInboxRecords} selectedProjectPath={selected.path} /></TabsContent>
-            <TabsContent value="context" className="mt-4"><ContextPanel project={selected} /></TabsContent>
-            <TabsContent value="memories" className="mt-4"><MemoriesPanel agents={selectedProjectAgents} /></TabsContent>
-            <TabsContent value="agents" className="mt-4"><AgentsPanel agents={selectedProjectAgents} /></TabsContent>
-            <TabsContent value="github" className="mt-4 grid gap-4"><GitHubRepoPanel project={selected} repoData={selectedGithubRepo} freshness={selectedGithubRepoResponse?.freshness} refreshing={selectedGithubRepoRefreshing} onRefresh={() => handleRefreshGithubRepo(selected.path)} /><GitHubIssuesPanel project={selected} issueCount={selectedGithubIssues.length} freshness={selectedGithubIssuesResponse?.freshness} refreshing={selectedGithubIssuesRefreshing} onRefresh={() => handleRefreshGithubIssues(selected.path)} /><GitHubIssuesDashboard issues={selectedGithubIssues} selectedProjectPath={selected.path} /></TabsContent>
+            <TabsList><TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="work">Work</TabsTrigger><TabsTrigger value="context">Context</TabsTrigger><TabsTrigger value="github">GitHub</TabsTrigger><TabsTrigger value="agents">Agents</TabsTrigger><TabsTrigger value="activity">Activity</TabsTrigger></TabsList>
+            <TabsContent value="overview" className="mt-4 grid gap-4 lg:grid-cols-2">
+              <SuggestedActionsPanel project={selected} inboxRecords={selectedInboxRecords} issueCount={selectedGithubIssues.length} />
+              <GitHealthPanel summary={selectedGitSummary} />
+              <InboxPanel project={selected} />
+              <GitHubIssuesPanel project={selected} issueCount={selectedGithubIssues.length} freshness={selectedGithubIssuesResponse?.freshness} refreshing={selectedGithubIssuesRefreshing} onRefresh={() => handleRefreshGithubIssues(selected.path)} />
+              <ShellCard title="Documentation snapshot" description="README and ADR overview" icon={<MessageSquareText className="size-4" />} className="lg:col-span-2">
+                <div className="mb-4 grid gap-2 sm:grid-cols-3">
+                  <StatCard label="Context files" value={`${selectedContextOk}/${selected.context_files.length}`} />
+                  <StatCard label="ADRs" value={selected.docs.adr_count} />
+                  <StatCard label="Latest ADR" value={selected.docs.latest_adr?.path.replace("docs/adr/", "") ?? "—"} />
+                </div>
+                <ProjectReadmeSummary project={selected} />
+              </ShellCard>
+            </TabsContent>
+            <TabsContent value="work" className="mt-4 grid gap-4">
+              <AgentInboxDashboard records={selectedInboxRecords} selectedProjectPath={selected.path} />
+              <GitHubIssuesPanel project={selected} issueCount={selectedGithubIssues.length} freshness={selectedGithubIssuesResponse?.freshness} refreshing={selectedGithubIssuesRefreshing} onRefresh={() => handleRefreshGithubIssues(selected.path)} />
+              <GitHubIssuesDashboard issues={selectedGithubIssues} selectedProjectPath={selected.path} />
+            </TabsContent>
+            <TabsContent value="context" className="mt-4 grid gap-4"><ContextPanel project={selected} /><ReadmePanel project={selected} /></TabsContent>
+            <TabsContent value="github" className="mt-4 grid gap-4"><GitHubRepoPanel project={selected} repoData={selectedGithubRepo} freshness={selectedGithubRepoResponse?.freshness} refreshing={selectedGithubRepoRefreshing} onRefresh={() => handleRefreshGithubRepo(selected.path)} /></TabsContent>
+            <TabsContent value="agents" className="mt-4"><AgentsWorkspace agents={selectedProjectAgents} /></TabsContent>
+            <TabsContent value="activity" className="mt-4"><ActivityPanel records={selectedActivityRecords} /></TabsContent>
           </Tabs>
         ) : null}
 

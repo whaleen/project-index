@@ -15,9 +15,10 @@
 - Agents tab consolidates MCP, skills, and sessions
   - Sessions discovered from native storage for Claude, Codex, Gemini, and Pi
   - Inline session summary for Claude and Pi JSONL sessions
-- Tauri desktop companion now includes project Memories and Agents tabs:
-  - Memories previews native Claude/Codex/Gemini/Pi memory/config files
-  - Agents inventories project-local skills, `.mcp.json` servers, and native agent sessions
+- Tauri desktop companion project pages now use focused tabs: Overview, Work, Context, GitHub, Agents, Activity
+  - Work keeps Agent Inbox and GitHub Issues separate but colocated
+  - Context owns README/docs/ADR/context file surfaces
+  - Agents combines memories, skills, MCP servers, and native sessions
 - MCP server: `px mcp serve` exposes read-only inspection tools
 - Source split into focused modules: config, project, github, agent, skills, cli, lib
 
