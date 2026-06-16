@@ -380,7 +380,7 @@ function countPresent(project: ProjectObservation) {
   return project.context_files.filter((item) => item.present).length;
 }
 
-function RepoAvatar({ project, repoData, size = "md" }: { project: ProjectObservation; repoData?: GitHubRepoRecord | null; size?: "sm" | "md" | "lg" }) {
+function RepoAvatar({ project, repoData, size = "md" }: { project: ProjectObservation; repoData?: GitHubRepoRecord | null; size?: "sm" | "md" | "lg" | "xl" }) {
   // Repo image is intentionally local app/web identity only: app icon, favicon,
   // apple-touch-icon, or logo. Do not fall back to GitHub org avatars here.
   const src = repoData?.local_icon_url ?? project.visuals.local_icon_url;
@@ -388,9 +388,10 @@ function RepoAvatar({ project, repoData, size = "md" }: { project: ProjectObserv
     "shrink-0 rounded-md border bg-muted object-cover",
     size === "sm" && "size-8",
     size === "md" && "size-10",
-    size === "lg" && "size-16"
+    size === "lg" && "size-16",
+    size === "xl" && "size-24 rounded-2xl"
   );
-  if (!src) return <div className={cn(className, "grid place-items-center")}><FolderGit2 className="size-4 text-muted-foreground" /></div>;
+  if (!src) return <div className={cn(className, "grid place-items-center")}><FolderGit2 className={cn("text-muted-foreground", size === "xl" ? "size-9" : "size-4")} /></div>;
   return <img src={src} alt="" className={className} />;
 }
 
@@ -1404,7 +1405,7 @@ function App() {
           <Card className="mb-5 overflow-hidden">
             <CardContent className="flex flex-col gap-5 p-5 lg:flex-row lg:items-start lg:justify-between">
               <div className="flex min-w-0 gap-4">
-                <RepoAvatar project={selected} repoData={selectedGithubRepo} size="lg" />
+                <RepoAvatar project={selected} repoData={selectedGithubRepo} size="xl" />
                 <div className="min-w-0">
                   <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Project</div>
                   <h2 className="truncate text-3xl font-semibold tracking-tight">{selected.name}</h2>
