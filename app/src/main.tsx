@@ -1301,7 +1301,7 @@ function App() {
   return (
     <SidebarProvider className="h-full min-h-0 overflow-hidden">
       <Sidebar collapsible="icon">
-        <SidebarHeader className="pt-9">
+        <SidebarHeader>
           <div className="flex items-center gap-3 px-2 py-1">
             <div className="grid size-9 place-items-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground"><TerminalSquare className="size-5" /></div>
             <div className="min-w-0 group-data-[collapsible=icon]:hidden">
@@ -1371,10 +1371,10 @@ function App() {
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="min-h-0 overflow-hidden">
-        <header data-tauri-drag-region className="flex h-14 shrink-0 items-center gap-2 border-b bg-card/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-card/60">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-4" />
-          <div data-tauri-drag-region className="flex min-w-0 items-center gap-2 truncate text-sm text-muted-foreground"><span className="font-semibold text-foreground">project-index</span><span className="text-muted-foreground/60">/</span><span className="truncate">{view === "dashboard" ? "Dashboard" : view === "activity" ? "Activity" : view === "agent-library" ? "Agent Library" : selected?.name}</span></div>
+          <div className="truncate text-sm text-muted-foreground">{view === "dashboard" ? "Dashboard" : view === "activity" ? "Activity" : view === "agent-library" ? "Agent Library" : selected?.name}</div>
           {lastLocalObservationAt ? <Badge variant="outline" className="ml-auto hidden sm:inline-flex">local changed {fmtEpoch(lastLocalObservationAt)}</Badge> : null}
           <div className={lastLocalObservationAt ? "" : "ml-auto"}>
             <Button size="sm" variant="outline" onClick={() => refreshLocalOverview(false)} disabled={overviewRefreshing}>
