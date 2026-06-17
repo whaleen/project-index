@@ -8,15 +8,16 @@ It must not scaffold, repair, mutate, or synchronize project files. See `docs/ad
 
 ## Structure
 
-Code is split across `cli/src/` modules: config, project, github, agent, skills, cli, lib.
+Code is split across `cli/src/` modules for the terminal/MCP surface and `app/` for the Tauri desktop companion.
 
 Entry surfaces:
 
 - **TUI**: `project_index::start()`
 - **CLI**: `project_index::run_cli(&args)`
 - **MCP**: `px mcp serve`
+- **Desktop app**: `app/` Tauri v2 + React companion, with Rust commands in `app/src-tauri/src/lib.rs`
 
-`src/main.rs` and `src/bin/px.rs` route to CLI when subcommands are present, otherwise start the TUI.
+`cli/src/main.rs` and `cli/src/bin/px.rs` route to CLI when subcommands are present, otherwise start the TUI. The desktop app is run through Tauri from `app/`.
 
 ## Screen Model
 
@@ -25,9 +26,9 @@ Screen::Projects          — root project list
 Screen::InProject(tab)    — selected project
 ```
 
-Current tabs: `Home | Issues | Config | Prompts | Memories | Agents | Pane`.
+Current TUI tabs: `Home | Issues | Config | Memories | Agents | Pane`.
 
-Target tabs may change as cleanup removes prompt/setup behavior. The intended durable surfaces are Overview/Git, Issues, Context, Sessions, Agents/System.
+Current desktop project tabs: `Overview | Work | Context | GitHub | Agents | Activity`. The desktop app is the rich UI discovery surface; proven views can later be ported back to Ratatui.
 
 ## Data Sources
 
@@ -37,7 +38,9 @@ Target tabs may change as cleanup removes prompt/setup behavior. The intended du
 
 ### GitHub
 
-Home and Issues shell out to `gh`. GitHub metadata and avatars may be cached under `~/.project-index/` for display performance.
+The TUI Home and Issues surfaces shell out to `gh`. GitHub metadata and avatars may be cached under `~/.project-index/` for display performance.
+
+The desktop app keeps GitHub repo metadata/OpenGraph and issues as stale-while-revalidate observations. Navigation reads cached data; explicit refresh actions perform live GitHub calls and update SQLite-backed cache records with freshness metadata.
 
 ### Context files
 
@@ -50,7 +53,7 @@ The Config/Context surface observes project files such as:
 - `.mcp.json`
 - agent/project skill files when present
 
-These are observations only. Pemguin should not create, delete, reset, repair, or edit them.
+These are observations only. project-index should not create, delete, reset, repair, or edit them.
 
 ### Native agent storage
 
@@ -76,17 +79,23 @@ Skills/MCP:
 - project `.agents/skills` and `skills-lock.json`
 - global `~/.agents`, `~/.claude`, `~/.codex`, `~/.gemini`, `~/.pi/agent` sources as the implementation expands
 
+### Desktop observation cache
+
+The desktop app stores observation snapshots, GitHub caches, and bounded activity events in SQLite at `~/.project-index/project-index.sqlite`. This is a cache only; repositories, native agent files, `.agent/inbox/`, and GitHub remain the source of truth.
+
+Lightweight filesystem watchers observe project roots, `.git`, context/docs, `.agent/inbox/`, and skill directories, then emit `observation://updated` events to the frontend. A polling fallback keeps the dashboard moving if watcher events are missed.
+
 ## Read-only Contract
 
-No UI, CLI, or MCP path should write project files. If a feature needs mutation, it belongs outside Pemguin or must be explicitly re-approved with a new ADR.
+No UI, CLI, MCP, or desktop-app path should write project files. If a feature needs mutation, it belongs outside project-index or must be explicitly re-approved with a new ADR.
 
-Legacy mutation paths to remove:
+Legacy mutation paths to keep out of scope:
 
 - setup apply/reset/delete
 - MCP install/repair/edit/delete
 - prompt creation/editing/storage
 - memory creation/editing/deletion/sync
-- project-local `.project-index/` session registries/exports
+- project-local `.project-index/`, `.pemguin/`, `.memory/`, or `.prompts/` state as source of truth
 
 ## Module Split Target
 
