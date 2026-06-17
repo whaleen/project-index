@@ -23,8 +23,8 @@ See `docs/adr/0001-read-only-work-index.md` and `docs/adr/0002-tauri-desktop-com
 ## Product Surfaces
 
 - ✅ `px` CLI/TUI/MCP remains the fast terminal and agent-facing inspection surface
-- 📋 Tauri desktop companion under `app/` for rich local project/agent dashboard iteration
-- 📋 Use the desktop companion to refine information architecture before porting proven views back to the Ratatui TUI
+- ✅ Tauri desktop companion under `app/` for rich local project/agent dashboard iteration
+- ✅ Use the desktop companion to refine information architecture before porting proven views back to the Ratatui TUI
 - ❌ Desktop app install/repair/scaffold/mutation flows without a new ADR and explicit contract change
 
 ## Observed Project Index
@@ -69,12 +69,12 @@ Observe, never create or repair:
 - ✅ `AGENTS.md`
 - ✅ `GEMINI.md`
 - ✅ `.mcp.json`
-- 📋 `SPEC.md`
+- ✅ `SPEC.md`
 - ✅ `docs/`
 - ✅ `docs/adr/` as the standard architecture decision record location
 - 📋 `.pi/settings.json`, `.pi/agents/`, `.pi/chains/`
-- 📋 `.agents/skills/`, `skills-lock.json`
-- 📋 `.agent/inbox/README.md`, `.agent/inbox/schema.md`, `.agent/inbox/feedback.jsonl`
+- ✅ `.agents/skills/`, `skills-lock.json`
+- ✅ `.agent/inbox/README.md`, `.agent/inbox/schema.md`, `.agent/inbox/feedback.jsonl`
 - 📋 stale/legacy markers such as `.pemguin/`, `.memory/`, `.prompts/`, `.cntx/`
 
 ## Agent Sessions Surface
@@ -123,11 +123,11 @@ These behaviors are intentionally out of scope and should be removed when encoun
 
 project-index observes local agent inbox installations as workflow state. Installation and mutation belong to the separate `agent-inbox` package/skill, not project-index.
 
-- 📋 Detect `.agent/inbox/` per project
-- 📋 Summarize active record counts by status: `new`, `planned`, `accepted`, `in_progress`, `done`, `wontfix`
-- 📋 Read active records from `.agent/inbox/feedback.jsonl` when present
-- 📋 Surface missing inbox docs/schema as observation-only project health
-- 📋 Show copyable prompts or install commands without executing them
+- ✅ Detect `.agent/inbox/` per project
+- ✅ Summarize active record counts by status: `new`, `planned`, `accepted`, `in_progress`, `done`, `wontfix`
+- ✅ Read active records from `.agent/inbox/feedback.jsonl` when present
+- ✅ Surface missing inbox docs/schema as observation-only project health
+- ✅ Show copyable prompts or install commands without executing them
 - ❌ Creating, editing, deleting, planning, accepting, or marking inbox records from project-index
 - ❌ Installing agent-inbox into projects from project-index without a new ADR/contract change
 
@@ -141,9 +141,5 @@ project-index observes local agent inbox installations as workflow state. Instal
 - 📋 Add regression checks for read-only behavior: no UI/CLI/MCP/app path should write project files.
 
 ## Known Issues
-
-
-
-
 - Codex session scan can be slow on large histories.
-- Project selection resets after full rescan.
+- Desktop observation refresh is implemented as a lightweight watcher/polling/cache slice; ADR 0003/0004 still call for deeper bounded queue and freshness polish.

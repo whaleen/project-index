@@ -56,13 +56,14 @@ Desktop pages:
 | Page | What it shows |
 |------|---------------|
 | Dashboard | Detailed project cards sorted by latest commit, plus cross-project Agent Inbox and GitHub issue tabs |
+| Activity | Recent local/GitHub observation events from the SQLite cache, plus cache counts |
 | Agent Library | Unified prompts, recipes, and skills from `/Users/josh/Projects/_whaleen/agent-library` |
-| Project Overview | Repo/app identity, GitHub OpenGraph card, README, suggested actions, git health, Agent Inbox and GitHub summaries |
-| Project Agent Inbox | Read-only inbox records with copyable planning/implementation prompts |
-| Project Context | Observed context files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.mcp.json`, `docs/`, `docs/adr/`) |
-| Project Memories | Native Claude/Codex/Gemini/Pi memory/config file previews |
-| Project Agents | Project-local skills, `.mcp.json` servers, and native agent sessions |
-| Project GitHub | GitHub repo metadata and open issues |
+| Project Overview | Repo/app identity, GitHub OpenGraph card, README/docs snapshot, suggested actions, git health, Agent Inbox, and GitHub summaries |
+| Project Work | Read-only Agent Inbox records and GitHub issues with copyable planning/implementation prompts |
+| Project Context | Observed context files (`SPEC.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.mcp.json`, `.agent/inbox/`, `docs/`, `docs/adr/`) plus README/ADR previews |
+| Project GitHub | Cached GitHub repo metadata/OpenGraph card with explicit refresh |
+| Project Agents | Native memories/config previews, project-local skills, `.mcp.json` servers, and native agent sessions |
+| Project Activity | Recent observation events for the selected project |
 
 ## TUI tabs
 
