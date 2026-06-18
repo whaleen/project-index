@@ -1,6 +1,6 @@
 [package]
 name = "project-index"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 description = "A read-only terminal work index for humans and agents — projects, git state, sessions, memories, skills, and MCP config in one surface."
 license = "MIT"
